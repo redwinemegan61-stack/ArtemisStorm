@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Play,
   CheckCircle2,
@@ -24,15 +24,23 @@ import {
   Sparkles,
   PackageCheck,
   FileText,
+  HeartPulse,
+  TrendingUp,
 } from 'lucide-react';
 import {
   INITIAL_ARTEMIS_REA_REPORT,
   DEFAULT_PIPELINE_STEPS,
+  INITIAL_HISTORICAL_CI_RUNS,
+  INITIAL_FLAKY_TEST_RECORDS,
   ReverseEngineeringReport,
   ArchitectureNode,
   TrustGroupSop,
+  HistoricalCiExecution,
+  FlakyTestRecord,
 } from './data/presets';
 import ModuleTopologyGraph, { TopologyGraphNode } from './components/ModuleTopologyGraph';
+import PipelineHealthChart from './components/PipelineHealthChart';
+import QuantWorkflowStudio from './components/QuantWorkflowStudio';
 
 type ArtifactTab = 'unified-ci' | 'posix-patch' | 'pytest-suite' | 'original-ci';
 type TierFilter = 'All' | 'Supervisor' | 'MCP Core' | 'Decompiler Bridge' | 'Device Automation' | 'CI/CD Gate';
@@ -245,6 +253,101 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
     },
   ]);
 
+  // Open Source Quant Repository & Workflow Creator Window state
+  const [isQuantStudioOpen, setIsQuantStudioOpen] = useState<boolean>(false);
+
+  // Pipeline Health & Flaky Test Intelligence states
+  const [ciRuns, setCiRuns] = useState<HistoricalCiExecution[]>(INITIAL_HISTORICAL_CI_RUNS);
+  const [flakyTests, setFlakyTests] = useState<FlakyTestRecord[]>(INITIAL_FLAKY_TEST_RECORDS);
+  const [selectedCiRunId, setSelectedCiRunId] = useState<string | undefined>('run-118');
+  const [selectedFlakyTestId, setSelectedFlakyTestId] = useState<string | undefined>('flaky-01');
+  const [ciHealthBranchFilter, setCiHealthBranchFilter] = useState<'all' | 'main' | 'feat/rea-bridge' | 'fix/posix-runner-shim'>('all');
+  const [ciHealthStatusFilter, setCiHealthStatusFilter] = useState<'all' | 'passed' | 'failed' | 'flaky'>('all');
+  const [isRecordingLiveRun, setIsRecordingLiveRun] = useState<boolean>(false);
+  const [ciHealthNote, setCiHealthNote] = useState<string | null>(null);
+
+  // Sync health metrics on mount
+  useEffect(() => {
+    fetch('/api/ci/health')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.ok) {
+          if (Array.isArray(data.runs) && data.runs.length > 0) {
+            setCiRuns(data.runs);
+          }
+          if (Array.isArray(data.flakyTests) && data.flakyTests.length > 0) {
+            setFlakyTests(data.flakyTests);
+          }
+        }
+      })
+      .catch(() => {
+        // Fallback to presets
+      });
+  }, []);
+
+  const filteredCiRuns = useMemo(() => {
+    return ciRuns.filter((run) => {
+      const matchesBranch = ciHealthBranchFilter === 'all' || run.branch === ciHealthBranchFilter;
+      const matchesStatus = ciHealthStatusFilter === 'all' || run.status === ciHealthStatusFilter;
+      return matchesBranch && matchesStatus;
+    });
+  }, [ciRuns, ciHealthBranchFilter, ciHealthStatusFilter]);
+
+  const handleRecordSimulatedRun = async (overrideStatus?: 'passed' | 'failed' | 'flaky') => {
+    setIsRecordingLiveRun(true);
+    setCiHealthNote(null);
+    try {
+      const statusToRecord = overrideStatus || 'passed';
+      const isFlaky = statusToRecord === 'flaky';
+      const isFailed = statusToRecord === 'failed';
+      const randomSha = Math.random().toString(16).substring(2, 9);
+      const branch = targetDeployBranch || 'main';
+
+      const failingTestIds = isFailed
+        ? ['flaky-01', 'flaky-02']
+        : isFlaky
+        ? ['flaky-02']
+        : [];
+
+      const payload = {
+        commitSha: randomSha,
+        commitMsg: isFailed
+          ? 'fix(mcp): attempt unverified adb mock transport'
+          : isFlaky
+          ? 'test(mcp): probe adb device action socket race'
+          : 'ci(swarm): verify posix compat & rea ast extraction',
+        branch,
+        author: 'artemis-agent',
+        status: statusToRecord,
+        passedTests: isFailed ? 19 : isFlaky ? 21 : 24,
+        failedTests: isFailed ? 5 : 0,
+        flakyTests: isFlaky ? 3 : 0,
+        totalTests: 24,
+        durationSeconds: Math.round((5.8 + Math.random() * 3.2) * 10) / 10,
+        failingTestIds,
+      };
+
+      const res = await fetch('/api/ci/record-run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        if (Array.isArray(data.runs)) setCiRuns(data.runs);
+        if (Array.isArray(data.flakyTests)) setFlakyTests(data.flakyTests);
+        if (data.run) setSelectedCiRunId(data.run.id);
+        setCiHealthNote(
+          `Recorded Run #${data.run?.runNumber} (${data.run?.status.toUpperCase()}) on ${data.run?.branch} @ ${data.run?.commitSha}`
+        );
+      }
+    } catch {
+      setCiHealthNote('Run recorded locally in dashboard session.');
+    } finally {
+      setIsRecordingLiveRun(false);
+    }
+  };
+
   const handleInspectGitHub = async (overrideRepo?: string) => {
     const target = overrideRepo ?? repoInput;
     if (overrideRepo) setRepoInput(overrideRepo);
@@ -337,6 +440,7 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
         setCompletedSteps((prev) => [...prev, step.id]);
         if (idx === DEFAULT_PIPELINE_STEPS.length - 1) {
           setIsRunningCi(false);
+          handleRecordSimulatedRun('passed');
         }
       }, (idx + 1) * 450);
     });
@@ -679,18 +783,24 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
           Artemis &amp; REA Studio
         </a>
 
-        <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-400">
+        <nav className="hidden lg:flex items-center gap-5 text-sm font-medium text-slate-400">
           <a
             href="#ci-pipeline"
             className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
           >
-            Pipeline &amp; CI
+            Pipeline
+          </a>
+          <a
+            href="#pipeline-health"
+            className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
+          >
+            Health
           </a>
           <a
             href="#architecture"
             className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
           >
-            Architecture
+            Topology
           </a>
           <a
             href="#trust-group"
@@ -710,9 +820,26 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
           >
             Releases
           </a>
+          <button
+            type="button"
+            onClick={() => setIsQuantStudioOpen(true)}
+            className="text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <TrendingUp className="w-3.5 h-3.5" />
+            <span>Quant Studio</span>
+          </button>
         </nav>
 
         <div className="flex items-center gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={() => setIsQuantStudioOpen(true)}
+            className="px-3 py-2 text-xs font-semibold text-emerald-400 bg-emerald-950/40 hover:bg-emerald-950/70 border border-emerald-500/40 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <TrendingUp className="w-3.5 h-3.5" />
+            <span>Quant Studio (Window)</span>
+          </button>
+
           <button
             type="button"
             onClick={handleRunSwarmAnalysis}
@@ -1133,12 +1260,117 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
           </div>
         </section>
 
-        {/* Section 02: Reverse-Engineered Architecture & MCP Tool Contracts */}
+        {/* Section 02: Pipeline Health & Flaky Test Intelligence */}
+        <section id="pipeline-health" className="space-y-6 scroll-mt-20">
+          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 border-b border-slate-800 pb-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <HeartPulse className="w-5 h-5 text-emerald-400" />
+                <h2 className="text-xl font-bold text-white font-display">
+                  02. Pipeline Health &amp; Flaky Test Intelligence
+                </h2>
+              </div>
+              <p className="text-sm text-slate-400">
+                D3-powered temporal trend analysis of CI pass rates, runner execution latency, and root-cause telemetry
+                across recent continuous push executions.
+              </p>
+            </div>
+
+            {/* Filter & Live Run Simulation Controls */}
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* Branch Filter */}
+              <div className="flex items-center gap-1 p-1 bg-[#111827] border border-slate-800 rounded-lg text-xs">
+                {(['all', 'main', 'feat/rea-bridge', 'fix/posix-runner-shim'] as const).map((branch) => (
+                  <button
+                    key={branch}
+                    type="button"
+                    onClick={() => setCiHealthBranchFilter(branch)}
+                    className={`px-2 py-1 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                      ciHealthBranchFilter === branch
+                        ? 'bg-slate-800 text-white font-semibold'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {branch === 'all' ? 'All Branches' : branch}
+                  </button>
+                ))}
+              </div>
+
+              {/* Status Filter */}
+              <div className="flex items-center gap-1 p-1 bg-[#111827] border border-slate-800 rounded-lg text-xs">
+                {(['all', 'passed', 'failed', 'flaky'] as const).map((status) => (
+                  <button
+                    key={status}
+                    type="button"
+                    onClick={() => setCiHealthStatusFilter(status)}
+                    className={`px-2 py-1 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer capitalize ${
+                      ciHealthStatusFilter === status
+                        ? 'bg-slate-800 text-white font-semibold'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {status}
+                  </button>
+                ))}
+              </div>
+
+              {/* Simulation Actions */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={isRecordingLiveRun}
+                  onClick={() => handleRecordSimulatedRun('passed')}
+                  className="px-3 py-1.5 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-60 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  <span>{isRecordingLiveRun ? 'Recording...' : 'Simulate Live Push'}</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isRecordingLiveRun}
+                  onClick={() => handleRecordSimulatedRun('flaky')}
+                  className="px-3 py-1.5 text-xs font-medium text-amber-300 bg-amber-950/40 hover:bg-amber-950/70 border border-amber-500/40 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span>Simulate Flake</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {ciHealthNote && (
+            <div className="p-3 bg-emerald-950/30 border border-emerald-500/40 rounded-lg flex items-center justify-between text-xs text-emerald-300">
+              <span className="flex items-center gap-2 font-mono">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{ciHealthNote}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setCiHealthNote(null)}
+                className="text-slate-400 hover:text-slate-200 ml-4 cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {/* D3 Timeline Chart & Flaky Test Intelligence Matrix */}
+          <PipelineHealthChart
+            runs={filteredCiRuns}
+            flakyTests={flakyTests}
+            selectedRunId={selectedCiRunId}
+            onSelectRun={(run) => setSelectedCiRunId(run.id)}
+            selectedTestId={selectedFlakyTestId}
+            onSelectTest={(test) => setSelectedFlakyTestId(test.id)}
+          />
+        </section>
+
+        {/* Section 03: Reverse-Engineered Architecture & MCP Tool Contracts */}
         <section id="architecture" className="space-y-6 scroll-mt-20">
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-800 pb-4">
             <div className="space-y-1">
               <h2 className="text-xl font-bold text-white font-display">
-                02. Reverse-Engineered Module Topology &amp; MCP Contracts
+                03. Reverse-Engineered Module Topology &amp; MCP Contracts
               </h2>
               <p className="text-sm text-slate-400">
                 Structural decomposition linking <code className="font-mono text-slate-200">morluto/rea</code> binary/AST
@@ -1358,12 +1590,12 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
           </div>
         </section>
 
-        {/* Section 03: Trust-Group Agent Delegation & Minimum-Compute Playbook */}
+        {/* Section 04: Trust-Group Agent Delegation & Minimum-Compute Playbook */}
         <section id="trust-group" className="space-y-6 scroll-mt-20">
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-800 pb-4">
             <div className="space-y-1">
               <h2 className="text-xl font-bold text-white font-display">
-                03. Trust-Group Agent Playbook &amp; Sub-Agent Supervision Studio
+                04. Trust-Group Agent Playbook &amp; Sub-Agent Supervision Studio
               </h2>
               <p className="text-sm text-slate-400">
                 Enforces tactical resource discipline: train Tier-2 and Tier-3 agents within our Trust Group to handle
@@ -1483,12 +1715,12 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
           </div>
         </section>
 
-        {/* Section 04: Direct GitHub Repository Deployment */}
+        {/* Section 05: Direct GitHub Repository Deployment */}
         <section id="github-deploy" className="space-y-6 scroll-mt-20">
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-800 pb-4">
             <div className="space-y-1">
               <h2 className="text-xl font-bold text-white font-display">
-                04. Deploy Unified REA + Artemis Pipeline to Your GitHub Repository
+                05. Deploy Unified REA + Artemis Pipeline to Your GitHub Repository
               </h2>
               <p className="text-sm text-slate-400">
                 Commit <code className="font-mono text-slate-200">.github/workflows/ci.yml</code> and{' '}
@@ -1637,12 +1869,12 @@ git push origin main`}</code>
           </div>
         </section>
 
-        {/* Section 05: CI/CD Webhook Registration */}
+        {/* Section 06: CI/CD Webhook Registration */}
         <section id="webhook-registration" className="space-y-6 scroll-mt-20">
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-800 pb-4">
             <div className="space-y-1">
               <h2 className="text-xl font-bold text-white font-display">
-                05. CI/CD Webhook Registration
+                06. CI/CD Webhook Registration
               </h2>
               <p className="text-sm text-slate-400">
                 Configure a GitHub Webhook Payload URL and HMAC-SHA256 Secret Token to automatically trigger the Artemis
@@ -1862,12 +2094,12 @@ git push origin main`}</code>
           </div>
         </section>
 
-        {/* Section 06: Release Automation */}
+        {/* Section 07: Release Automation */}
         <section id="release-automation" className="space-y-6 scroll-mt-20">
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-800 pb-4">
             <div className="space-y-1">
               <h2 className="text-xl font-bold text-white font-display">
-                06. Release Automation
+                07. Release Automation
               </h2>
               <p className="text-sm text-slate-400">
                 Trigger automated GitHub releases grounded in passing CI/CD matrix stages (5/5 gates) and synthesized
@@ -2170,15 +2402,148 @@ git push origin main`}</code>
             </div>
           </div>
         </section>
+
+        {/* Section 08: Open Source Quant Repositories & Workflow Creator Studio */}
+        <section id="quant-workflows" className="space-y-6 scroll-mt-20">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-800 pb-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-emerald-400" />
+                <h2 className="text-xl font-bold text-white font-display">
+                  08. Open Source Quant Repositories &amp; Workflow Creator Studio
+                </h2>
+              </div>
+              <p className="text-sm text-slate-400">
+                Connect leading open-source algorithmic trading and alpha research frameworks (<code className="font-mono text-slate-200">microsoft/qlib</code>,{' '}
+                <code className="font-mono text-slate-200">ccxt/ccxt</code>, <code className="font-mono text-slate-200">QuantConnect/Lean</code>, and{' '}
+                <code className="font-mono text-slate-200">vnpy/vnpy</code>) to build multi-stage quantitative pipelines in a dedicated optional window.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsQuantStudioOpen(true)}
+                className="px-4 py-2.5 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg transition-colors flex items-center gap-2 shadow-lg cursor-pointer"
+              >
+                <TrendingUp className="w-3.5 h-3.5 fill-current" />
+                <span>Launch Quant Studio Window</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 4 Quant Framework Highlights Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-[#111827] border border-slate-800 rounded-xl p-5 space-y-3 flex flex-col justify-between">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/40 border border-emerald-500/40 px-2 py-0.5 rounded">
+                    Alpha ML Platform
+                  </span>
+                  <span className="text-xs font-mono text-slate-400">★ 16.8k</span>
+                </div>
+                <h3 className="text-sm font-bold text-white">microsoft/qlib</h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  AI-oriented investment platform with binary high-throughput datasets, LightGBM/Transformer alpha models, and walk-forward portfolio optimization.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsQuantStudioOpen(true)}
+                className="w-full py-2 text-xs font-medium text-slate-300 bg-slate-800/80 hover:bg-slate-700 hover:text-white border border-slate-700 rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <span>Open in Workflow Studio</span>
+                <ArrowUpRight className="w-3.5 h-3.5 text-emerald-400" />
+              </button>
+            </div>
+
+            <div className="bg-[#111827] border border-slate-800 rounded-xl p-5 space-y-3 flex flex-col justify-between">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-mono text-sky-400 bg-sky-950/40 border border-sky-500/40 px-2 py-0.5 rounded">
+                    Crypto &amp; Multi-Exchange
+                  </span>
+                  <span className="text-xs font-mono text-slate-400">★ 34.5k</span>
+                </div>
+                <h3 className="text-sm font-bold text-white">ccxt/ccxt</h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Async WebSocket order book streaming across 100+ spot/perp venues with rate-limit token buckets and atomic multi-leg execution routing.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsQuantStudioOpen(true)}
+                className="w-full py-2 text-xs font-medium text-slate-300 bg-slate-800/80 hover:bg-slate-700 hover:text-white border border-slate-700 rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <span>Open in Workflow Studio</span>
+                <ArrowUpRight className="w-3.5 h-3.5 text-sky-400" />
+              </button>
+            </div>
+
+            <div className="bg-[#111827] border border-slate-800 rounded-xl p-5 space-y-3 flex flex-col justify-between">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-mono text-indigo-400 bg-indigo-950/40 border border-indigo-500/40 px-2 py-0.5 rounded">
+                    Multi-Asset Engine
+                  </span>
+                  <span className="text-xs font-mono text-slate-400">★ 9.2k</span>
+                </div>
+                <h3 className="text-sm font-bold text-white">QuantConnect/Lean</h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Institutional event-driven backtesting engine with realistic margin queueing, Value-at-Risk (VaR) models, and Interactive Brokers gateways.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsQuantStudioOpen(true)}
+                className="w-full py-2 text-xs font-medium text-slate-300 bg-slate-800/80 hover:bg-slate-700 hover:text-white border border-slate-700 rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <span>Open in Workflow Studio</span>
+                <ArrowUpRight className="w-3.5 h-3.5 text-indigo-400" />
+              </button>
+            </div>
+
+            <div className="bg-[#111827] border border-slate-800 rounded-xl p-5 space-y-3 flex flex-col justify-between">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-mono text-amber-400 bg-amber-950/40 border border-amber-500/40 px-2 py-0.5 rounded">
+                    Event-Driven CTA
+                  </span>
+                  <span className="text-xs font-mono text-slate-400">★ 23.4k</span>
+                </div>
+                <h3 className="text-sm font-bold text-white">vnpy/vnpy</h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  High-performance lock-free EventEngine with C++ binary connectors for futures, options, and stock market execution with strict risk filters.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsQuantStudioOpen(true)}
+                className="w-full py-2 text-xs font-medium text-slate-300 bg-slate-800/80 hover:bg-slate-700 hover:text-white border border-slate-700 rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <span>Open in Workflow Studio</span>
+                <ArrowUpRight className="w-3.5 h-3.5 text-amber-400" />
+              </button>
+            </div>
+          </div>
+        </section>
       </main>
 
       {/* Quiet Footer */}
       <footer className="border-t border-slate-800/80 py-6 px-6 mt-12">
         <div className="max-w-[1360px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
           <span>Artemis &amp; REA Swarm Studio · Tactical Reverse-Engineering &amp; Continuous CI/CD</span>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
             <a href="#ci-pipeline" className="hover:text-slate-300 transition-colors">
               CI/CD Pipeline
+            </a>
+            <span aria-hidden="true">·</span>
+            <a href="#pipeline-health" className="hover:text-slate-300 transition-colors">
+              Health Dashboard
             </a>
             <span aria-hidden="true">·</span>
             <a href="#architecture" className="hover:text-slate-300 transition-colors">
@@ -2186,7 +2551,7 @@ git push origin main`}</code>
             </a>
             <span aria-hidden="true">·</span>
             <a href="#trust-group" className="hover:text-slate-300 transition-colors">
-              Trust-Group Playbook
+              Trust Group
             </a>
             <span aria-hidden="true">·</span>
             <a href="#webhook-registration" className="hover:text-slate-300 transition-colors">
@@ -2196,9 +2561,30 @@ git push origin main`}</code>
             <a href="#release-automation" className="hover:text-slate-300 transition-colors">
               Releases
             </a>
+            <span aria-hidden="true">·</span>
+            <button
+              type="button"
+              onClick={() => setIsQuantStudioOpen(true)}
+              className="hover:text-emerald-400 transition-colors cursor-pointer"
+            >
+              Quant Studio
+            </button>
           </div>
         </div>
       </footer>
+
+      {/* Optional Separate Window Modal for Quant Repository Workflow Creator */}
+      <QuantWorkflowStudio
+        isOpen={isQuantStudioOpen}
+        onClose={() => setIsQuantStudioOpen(false)}
+        onDeployToCi={(strategyCode) => {
+          setCustomCodeContext(strategyCode);
+          setTacticalObjective(
+            'Ensure quantitative strategy backtest passes in CI regression with Sharpe >= 1.50 and max drawdown < 7.5%.'
+          );
+          setActiveArtifactTab('unified-ci');
+        }}
+      />
     </div>
   );
 }

@@ -560,3 +560,1025 @@ export const INITIAL_ARTEMIS_REA_REPORT: ReverseEngineeringReport = {
   posixPatchCode: POSIX_COMPAT_PATCH,
   generatedTestSuite: GENERATED_SWARM_TEST_SUITE
 };
+
+// ---------------------------------------------------------------------------
+// Pipeline Health & Flaky Test Intelligence Data Models & Presets
+// ---------------------------------------------------------------------------
+
+export interface HistoricalCiExecution {
+  id: string;
+  runNumber: number;
+  commitSha: string;
+  commitMsg: string;
+  branch: string;
+  author: string;
+  timestamp: string;
+  durationSeconds: number;
+  status: 'passed' | 'failed' | 'flaky';
+  passedTests: number;
+  failedTests: number;
+  flakyTests: number;
+  totalTests: number;
+  passRatePct: number;
+  failingTestIds: string[];
+  remediated: boolean;
+}
+
+export interface FlakyTestRecord {
+  id: string;
+  testName: string;
+  filePath: string;
+  flakinessRatePct: number;
+  failureMode: string;
+  rootCauseCategory:
+    | 'Windows/POSIX Subprocess'
+    | 'Socket Race Condition'
+    | 'Async Decompiler Timeout'
+    | 'Runner File Lock';
+  remediationStatus:
+    | 'Fixed via posix_compat'
+    | 'Fixed via mock ADB pooling'
+    | 'Active Investigation'
+    | 'Mitigated with Retries';
+  remediationSnippet: string;
+  totalExecutions: number;
+  recentResults: Array<'pass' | 'fail' | 'flake'>;
+}
+
+export const INITIAL_HISTORICAL_CI_RUNS: HistoricalCiExecution[] = [
+  {
+    id: 'run-101',
+    runNumber: 101,
+    commitSha: '9b14c2a',
+    commitMsg: 'feat: add initial REA decompiler bridge hook',
+    branch: 'feat/rea-bridge',
+    author: 'dev-artemis',
+    timestamp: '2026-10-24T18:22:00Z',
+    durationSeconds: 11.4,
+    status: 'failed',
+    passedTests: 18,
+    failedTests: 6,
+    flakyTests: 2,
+    totalTests: 24,
+    passRatePct: 75.0,
+    failingTestIds: ['flaky-01', 'flaky-03'],
+    remediated: false,
+  },
+  {
+    id: 'run-102',
+    runNumber: 102,
+    commitSha: 'd28a1c9',
+    commitMsg: 'test: adb device action headless runner',
+    branch: 'feat/rea-bridge',
+    author: 'morluto-bot',
+    timestamp: '2026-10-24T19:05:00Z',
+    durationSeconds: 10.8,
+    status: 'flaky',
+    passedTests: 20,
+    failedTests: 1,
+    flakyTests: 3,
+    totalTests: 24,
+    passRatePct: 83.3,
+    failingTestIds: ['flaky-02'],
+    remediated: false,
+  },
+  {
+    id: 'run-103',
+    runNumber: 103,
+    commitSha: 'e71f40d',
+    commitMsg: 'ci: enable matrix test for ubuntu-latest',
+    branch: 'main',
+    author: 'artemis-core',
+    timestamp: '2026-10-24T20:12:00Z',
+    durationSeconds: 13.2,
+    status: 'failed',
+    passedTests: 17,
+    failedTests: 7,
+    flakyTests: 1,
+    totalTests: 24,
+    passRatePct: 70.8,
+    failingTestIds: ['flaky-01', 'flaky-04'],
+    remediated: false,
+  },
+  {
+    id: 'run-104',
+    runNumber: 104,
+    commitSha: '18ab93f',
+    commitMsg: 'refactor: isolate mock adb daemon socket',
+    branch: 'fix/adb-socket-race',
+    author: 'artemis-core',
+    timestamp: '2026-10-24T21:45:00Z',
+    durationSeconds: 9.6,
+    status: 'flaky',
+    passedTests: 21,
+    failedTests: 0,
+    flakyTests: 3,
+    totalTests: 24,
+    passRatePct: 87.5,
+    failingTestIds: ['flaky-02', 'flaky-05'],
+    remediated: false,
+  },
+  {
+    id: 'run-105',
+    runNumber: 105,
+    commitSha: '31cb54e',
+    commitMsg: 'mcp: test execute_device_action timeout handling',
+    branch: 'main',
+    author: 'dev-artemis',
+    timestamp: '2026-10-24T22:30:00Z',
+    durationSeconds: 10.1,
+    status: 'failed',
+    passedTests: 18,
+    failedTests: 5,
+    flakyTests: 1,
+    totalTests: 24,
+    passRatePct: 75.0,
+    failingTestIds: ['flaky-01'],
+    remediated: false,
+  },
+  {
+    id: 'run-106',
+    runNumber: 106,
+    commitSha: '7f99a1b',
+    commitMsg: 'ci: add uv cache step to github actions',
+    branch: 'main',
+    author: 'ci-bot',
+    timestamp: '2026-10-24T23:50:00Z',
+    durationSeconds: 8.9,
+    status: 'failed',
+    passedTests: 19,
+    failedTests: 4,
+    flakyTests: 1,
+    totalTests: 24,
+    passRatePct: 79.2,
+    failingTestIds: ['flaky-01', 'flaky-03'],
+    remediated: false,
+  },
+  {
+    id: 'run-107',
+    runNumber: 107,
+    commitSha: 'b488ce1',
+    commitMsg: 'swarm: trust group worker token savings test',
+    branch: 'feat/swarm-trust',
+    author: 'supervisor-swarm',
+    timestamp: '2026-10-25T01:10:00Z',
+    durationSeconds: 9.2,
+    status: 'flaky',
+    passedTests: 21,
+    failedTests: 1,
+    flakyTests: 2,
+    totalTests: 24,
+    passRatePct: 87.5,
+    failingTestIds: ['flaky-02'],
+    remediated: false,
+  },
+  {
+    id: 'run-108',
+    runNumber: 108,
+    commitSha: '56e9c40',
+    commitMsg: 'chore: probe Windows vs Linux subprocess creation',
+    branch: 'fix/posix-runner-shim',
+    author: 'artemis-core',
+    timestamp: '2026-10-25T03:25:00Z',
+    durationSeconds: 8.7,
+    status: 'failed',
+    passedTests: 19,
+    failedTests: 5,
+    flakyTests: 0,
+    totalTests: 24,
+    passRatePct: 79.2,
+    failingTestIds: ['flaky-01'],
+    remediated: false,
+  },
+  {
+    id: 'run-109',
+    runNumber: 109,
+    commitSha: '2d48f91',
+    commitMsg: 'fix: draft posix_compat module for CREATE_NEW_PROCESS_GROUP',
+    branch: 'fix/posix-runner-shim',
+    author: 'artemis-core',
+    timestamp: '2026-10-25T06:40:00Z',
+    durationSeconds: 8.5,
+    status: 'flaky',
+    passedTests: 22,
+    failedTests: 1,
+    flakyTests: 1,
+    totalTests: 24,
+    passRatePct: 91.7,
+    failingTestIds: ['flaky-02'],
+    remediated: false,
+  },
+  {
+    id: 'run-110',
+    runNumber: 110,
+    commitSha: 'a4c91e8',
+    commitMsg: 'ci(artemis-rea): install posix_compat shim & eliminate subprocess flakiness',
+    branch: 'main',
+    author: 'artemis-ci-bot',
+    timestamp: '2026-10-25T09:15:00Z',
+    durationSeconds: 7.4,
+    status: 'passed',
+    passedTests: 24,
+    failedTests: 0,
+    flakyTests: 0,
+    totalTests: 24,
+    passRatePct: 100.0,
+    failingTestIds: [],
+    remediated: true,
+  },
+  {
+    id: 'run-111',
+    runNumber: 111,
+    commitSha: 'e912bc3',
+    commitMsg: 'test: add comprehensive mock ADB daemon pooling',
+    branch: 'main',
+    author: 'morluto-bot',
+    timestamp: '2026-10-25T11:30:00Z',
+    durationSeconds: 7.1,
+    status: 'passed',
+    passedTests: 24,
+    failedTests: 0,
+    flakyTests: 0,
+    totalTests: 24,
+    passRatePct: 100.0,
+    failingTestIds: [],
+    remediated: true,
+  },
+  {
+    id: 'run-112',
+    runNumber: 112,
+    commitSha: '8401df2',
+    commitMsg: 'feat(mcp): stream REA AST symbols into Artemis prompt context',
+    branch: 'main',
+    author: 'artemis-core',
+    timestamp: '2026-10-25T13:45:00Z',
+    durationSeconds: 7.3,
+    status: 'passed',
+    passedTests: 24,
+    failedTests: 0,
+    flakyTests: 0,
+    totalTests: 24,
+    passRatePct: 100.0,
+    failingTestIds: [],
+    remediated: true,
+  },
+  {
+    id: 'run-113',
+    runNumber: 113,
+    commitSha: 'c58f01b',
+    commitMsg: 'chore: configure uv build distribution wheel packaging',
+    branch: 'main',
+    author: 'ci-bot',
+    timestamp: '2026-10-25T15:20:00Z',
+    durationSeconds: 6.9,
+    status: 'passed',
+    passedTests: 24,
+    failedTests: 0,
+    flakyTests: 0,
+    totalTests: 24,
+    passRatePct: 100.0,
+    failingTestIds: [],
+    remediated: true,
+  },
+  {
+    id: 'run-114',
+    runNumber: 114,
+    commitSha: '61a9bc7',
+    commitMsg: 'webhook: verify HMAC-SHA256 signature verification gate',
+    branch: 'main',
+    author: 'artemis-agent',
+    timestamp: '2026-10-25T17:05:00Z',
+    durationSeconds: 7.0,
+    status: 'passed',
+    passedTests: 24,
+    failedTests: 0,
+    flakyTests: 0,
+    totalTests: 24,
+    passRatePct: 100.0,
+    failingTestIds: [],
+    remediated: true,
+  },
+  {
+    id: 'run-115',
+    runNumber: 115,
+    commitSha: 'fd239a0',
+    commitMsg: 'release: prepare v0.4.2 automated distribution bundle',
+    branch: 'main',
+    author: 'supervisor-swarm',
+    timestamp: '2026-10-25T19:10:00Z',
+    durationSeconds: 7.2,
+    status: 'passed',
+    passedTests: 24,
+    failedTests: 0,
+    flakyTests: 0,
+    totalTests: 24,
+    passRatePct: 100.0,
+    failingTestIds: [],
+    remediated: true,
+  },
+  {
+    id: 'run-116',
+    runNumber: 116,
+    commitSha: '419eb0a',
+    commitMsg: 'ci: run all matrix suites upon commit push',
+    branch: 'main',
+    author: 'artemis-ci-bot',
+    timestamp: '2026-10-25T21:00:00Z',
+    durationSeconds: 6.8,
+    status: 'passed',
+    passedTests: 24,
+    failedTests: 0,
+    flakyTests: 0,
+    totalTests: 24,
+    passRatePct: 100.0,
+    failingTestIds: [],
+    remediated: true,
+  },
+  {
+    id: 'run-117',
+    runNumber: 117,
+    commitSha: '98cc2f1',
+    commitMsg: 'swarm: register push webhook and armed delivery route',
+    branch: 'main',
+    author: 'artemis-agent',
+    timestamp: '2026-10-25T23:14:00Z',
+    durationSeconds: 6.7,
+    status: 'passed',
+    passedTests: 24,
+    failedTests: 0,
+    flakyTests: 0,
+    totalTests: 24,
+    passRatePct: 100.0,
+    failingTestIds: [],
+    remediated: true,
+  },
+  {
+    id: 'run-118',
+    runNumber: 118,
+    commitSha: '01bc48f',
+    commitMsg: 'release(v0.4.3): synthesize release notes with lead supervisor agent',
+    branch: 'main',
+    author: 'artemis-ci-bot',
+    timestamp: '2026-10-26T01:30:00Z',
+    durationSeconds: 6.9,
+    status: 'passed',
+    passedTests: 24,
+    failedTests: 0,
+    flakyTests: 0,
+    totalTests: 24,
+    passRatePct: 100.0,
+    failingTestIds: [],
+    remediated: true,
+  },
+  {
+    id: 'run-119',
+    runNumber: 119,
+    commitSha: '7f9910c',
+    commitMsg: 'ci: verify d3 pipeline telemetry tracking and flaky matrix',
+    branch: 'main',
+    author: 'artemis-ci-bot',
+    timestamp: '2026-10-26T03:45:00Z',
+    durationSeconds: 6.6,
+    status: 'passed',
+    passedTests: 24,
+    failedTests: 0,
+    flakyTests: 0,
+    totalTests: 24,
+    passRatePct: 100.0,
+    failingTestIds: [],
+    remediated: true,
+  },
+  {
+    id: 'run-120',
+    runNumber: 120,
+    commitSha: 'e48a12d',
+    commitMsg: 'ci(artemis-rea): 100% green build on push trigger verification',
+    branch: 'main',
+    author: 'artemis-ci-bot',
+    timestamp: '2026-10-26T06:00:00Z',
+    durationSeconds: 6.5,
+    status: 'passed',
+    passedTests: 24,
+    failedTests: 0,
+    flakyTests: 0,
+    totalTests: 24,
+    passRatePct: 100.0,
+    failingTestIds: [],
+    remediated: true,
+  },
+];
+
+export const INITIAL_FLAKY_TEST_RECORDS: FlakyTestRecord[] = [
+  {
+    id: 'flaky-01',
+    testName: 'test_subprocess_creation_flags',
+    filePath: 'tests/unit/mcp/test_device_utils.py:42',
+    flakinessRatePct: 62.5,
+    failureMode:
+      "AttributeError: module 'subprocess' has no attribute 'CREATE_NEW_PROCESS_GROUP' when executing under Linux runner.",
+    rootCauseCategory: 'Windows/POSIX Subprocess',
+    remediationStatus: 'Fixed via posix_compat',
+    remediationSnippet: `try:
+    kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+except AttributeError:
+    kwargs["creationflags"] = 0  # POSIX runner normalization`,
+    totalExecutions: 20,
+    recentResults: ['fail', 'fail', 'fail', 'fail', 'pass', 'pass', 'pass', 'pass', 'pass', 'pass'],
+  },
+  {
+    id: 'flaky-02',
+    testName: 'test_device_action_timeout_handling',
+    filePath: 'tests/unit/mcp/test_device_action.py:118',
+    flakinessRatePct: 35.0,
+    failureMode:
+      'TimeoutError: Mock ADB socket daemon port collision on fast runner concurrency.',
+    rootCauseCategory: 'Socket Race Condition',
+    remediationStatus: 'Fixed via mock ADB pooling',
+    remediationSnippet: `@pytest.fixture(scope="function")
+def isolated_adb_socket(tmp_path):
+    sock_path = str(tmp_path / "mock_adb.sock")
+    with MockAdbServer(sock_path) as s:
+        yield s`,
+    totalExecutions: 20,
+    recentResults: ['flake', 'pass', 'flake', 'pass', 'flake', 'pass', 'pass', 'pass', 'pass', 'pass'],
+  },
+  {
+    id: 'flaky-03',
+    testName: 'test_decompiler_stdio_transport_handshake',
+    filePath: 'tests/integration/test_rea_bridge.py:76',
+    flakinessRatePct: 25.0,
+    failureMode:
+      'BrokenPipeError: Decompiler subprocess closed JSON-RPC pipe before handshake completed.',
+    rootCauseCategory: 'Async Decompiler Timeout',
+    remediationStatus: 'Mitigated with Retries',
+    remediationSnippet: `async with asyncio.timeout(5.0):
+    await transport.wait_handshake(retries=3, backoff=0.2)`,
+    totalExecutions: 20,
+    recentResults: ['fail', 'pass', 'pass', 'flake', 'pass', 'pass', 'pass', 'pass', 'pass', 'pass'],
+  },
+  {
+    id: 'flaky-04',
+    testName: 'test_ast_symbol_cache_concurrency',
+    filePath: 'tests/unit/rea/test_symbol_table.py:91',
+    flakinessRatePct: 20.0,
+    failureMode:
+      'PermissionError: [Errno 13] Access is denied: sqlite cache file locked by parallel pytest worker.',
+    rootCauseCategory: 'Runner File Lock',
+    remediationStatus: 'Fixed via mock ADB pooling',
+    remediationSnippet: `cache_db = f"file:memdb_{uuid.uuid4().hex}?mode=memory&cache=shared"`,
+    totalExecutions: 20,
+    recentResults: ['pass', 'fail', 'pass', 'pass', 'pass', 'pass', 'pass', 'pass', 'pass', 'pass'],
+  },
+  {
+    id: 'flaky-05',
+    testName: 'test_android_manifest_fast_xpath',
+    filePath: 'tests/unit/mcp/test_manifest_scanner.py:53',
+    flakinessRatePct: 15.0,
+    failureMode:
+      'AssertionError: Expected exported activity count 4, got 3 due to XML namespace stripping.',
+    rootCauseCategory: 'Async Decompiler Timeout',
+    remediationStatus: 'Fixed via posix_compat',
+    remediationSnippet: `namespaces = {"android": "http://schemas.android.com/apk/res/android"}
+root.findall(".//activity[@android:exported='true']", namespaces)`,
+    totalExecutions: 20,
+    recentResults: ['pass', 'flake', 'pass', 'pass', 'pass', 'pass', 'pass', 'pass', 'pass', 'pass'],
+  },
+  {
+    id: 'flaky-06',
+    testName: 'test_uv_ephemeral_wheel_installation',
+    filePath: 'tests/packaging/test_wheel_smoke.py:28',
+    flakinessRatePct: 10.0,
+    failureMode:
+      'CalledProcessError: uv pip install --no-index returned exit code 1 on cold runner cache.',
+    rootCauseCategory: 'Runner File Lock',
+    remediationStatus: 'Fixed via posix_compat',
+    remediationSnippet: `env["UV_SYSTEM_PYTHON"] = "1"
+env["UV_NO_BUILD_ISOLATION"] = "0"`,
+    totalExecutions: 20,
+    recentResults: ['pass', 'pass', 'pass', 'pass', 'pass', 'pass', 'pass', 'pass', 'pass', 'pass'],
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Open Source Quant Repository & Workflow Creator Presets & Models
+// ---------------------------------------------------------------------------
+
+export interface QuantRepository {
+  id: string;
+  name: string;
+  ownerRepo: string;
+  url: string;
+  description: string;
+  category: 'Alpha ML Platform' | 'Crypto & Multi-Exchange' | 'Multi-Asset Engine' | 'Event-Driven Platform';
+  stars: string;
+  license: string;
+  keyModules: string[];
+  defaultBranch: string;
+  language: string;
+  frameworkVersion: string;
+  highlightInvariants: string[];
+}
+
+export interface QuantWorkflowNode {
+  id: string;
+  type:
+    | 'data_ingest'
+    | 'alpha_signals'
+    | 'strategy_logic'
+    | 'risk_rules'
+    | 'backtest_engine'
+    | 'execution_broker'
+    | 'ci_regression';
+  title: string;
+  description: string;
+  stageBadge: string;
+  parameters: Record<string, string | number | boolean>;
+}
+
+export interface QuantWorkflowTemplate {
+  id: string;
+  title: string;
+  repoId: string;
+  repoName: string;
+  description: string;
+  targetAssetClass: 'Equities' | 'Crypto' | 'Futures' | 'FX';
+  timeframe: '1m' | '5m' | '1h' | '1D';
+  nodes: QuantWorkflowNode[];
+  generatedPythonStrategy: string;
+  generatedCiWorkflow: string;
+  backtestMetrics: {
+    sharpeRatio: number;
+    annualizedReturnPct: number;
+    maxDrawdownPct: number;
+    winRatePct: number;
+    totalTrades: number;
+    profitFactor: number;
+  };
+}
+
+export const INITIAL_QUANT_REPOSITORIES: QuantRepository[] = [
+  {
+    id: 'quant-qlib',
+    name: 'Microsoft Qlib',
+    ownerRepo: 'microsoft/qlib',
+    url: 'https://github.com/microsoft/qlib',
+    description:
+      'AI-oriented quantitative investment open-source platform, containing data preparation, alpha model training, backtesting, and portfolio optimization.',
+    category: 'Alpha ML Platform',
+    stars: '16.8k',
+    license: 'MIT License',
+    keyModules: [
+      'qlib.data.dataset (high-performance binary dataset storage)',
+      'qlib.model.trainer (LightGBM, GRU, Transformer alpha predictors)',
+      'qlib.backtest (execution simulator with slippage & order cost)',
+      'qlib.contrib.strategy (Topk, WeightStrategy, Risk-Parity)',
+    ],
+    defaultBranch: 'main',
+    language: 'Python',
+    frameworkVersion: 'v0.9.3',
+    highlightInvariants: [
+      'Pre-computed binary expressions avoid runtime pandas overhead (20x speedup)',
+      'Cross-sectional factor neutralization prevents market-beta exposure leakage',
+      'Walk-forward time-series split prevents lookahead bias in model validation',
+    ],
+  },
+  {
+    id: 'quant-ccxt',
+    name: 'CCXT Pro & Rest',
+    ownerRepo: 'ccxt/ccxt',
+    url: 'https://github.com/ccxt/ccxt',
+    description:
+      'Unified JavaScript/Python cryptocurrency trading and market data library with native support for 100+ exchanges, order books, and WebSocket feeds.',
+    category: 'Crypto & Multi-Exchange',
+    stars: '34.5k',
+    license: 'MIT License',
+    keyModules: [
+      'ccxt.pro (asynchronous WebSocket real-time orderbook streaming)',
+      'ccxt.binance / bybit / coinbase (unified normalized execution endpoints)',
+      'ccxt.async_support (high-throughput asyncio concurrent order router)',
+      'ccxt.base.errors (normalized exchange rate-limit and auth exceptions)',
+    ],
+    defaultBranch: 'master',
+    language: 'Python / TypeScript',
+    frameworkVersion: 'v4.2.18',
+    highlightInvariants: [
+      'Universal ticker and order data structures across 100+ spot and perp venues',
+      'Built-in exponential backoff token bucket prevents exchange API rate-limit bans',
+      'Dual-signature HMAC-SHA256 & Ed25519 authentication for live/testnet orders',
+    ],
+  },
+  {
+    id: 'quant-lean',
+    name: 'QuantConnect LEAN',
+    ownerRepo: 'QuantConnect/Lean',
+    url: 'https://github.com/QuantConnect/Lean',
+    description:
+      'Production-grade open source algorithmic trading engine in C# and Python, powering institutional backtesting, paper trading, and multi-broker execution.',
+    category: 'Multi-Asset Engine',
+    stars: '9.2k',
+    license: 'Apache-2.0',
+    keyModules: [
+      'QuantConnect.Algorithm (QCAlgorithm modular strategy lifecycle)',
+      'QuantConnect.Indicators (RSI, Bollinger, ATR, EMA technical indicators)',
+      'QuantConnect.Risk (MaximumDrawdownPercentPerSecurity, RiskParity)',
+      'QuantConnect.Brokerages (Interactive Brokers, Alpaca, Oanda gateways)',
+    ],
+    defaultBranch: 'master',
+    language: 'Python / C#',
+    frameworkVersion: 'v2.5.0',
+    highlightInvariants: [
+      'Tick-level event-driven simulation with realistic fill queuing and margin checks',
+      'Dynamic security universe selection based on dollar volume and volatility',
+      'Automated warm-up periods ensure technical indicators stabilize before orders fire',
+    ],
+  },
+  {
+    id: 'quant-vnpy',
+    name: 'VNPY Trading Framework',
+    ownerRepo: 'vnpy/vnpy',
+    url: 'https://github.com/vnpy/vnpy',
+    description:
+      'Event-driven quantitative trading platform providing institutional gateways to futures, options, equities, and crypto markets.',
+    category: 'Event-Driven Platform',
+    stars: '23.4k',
+    license: 'MIT License',
+    keyModules: [
+      'vnpy.trader.engine (EventEngine core dispatcher and timer loop)',
+      'vnpy_ctp / vnpy_ib (low-latency C++ binary gateway connectors)',
+      'vnpy.app.cta_strategy (CtaTemplate state machine and bar generator)',
+      'vnpy.app.risk_manager (order frequency check & max contract guard)',
+    ],
+    defaultBranch: 'master',
+    language: 'Python',
+    frameworkVersion: 'v3.9.0',
+    highlightInvariants: [
+      'Zero-lock lock-free EventEngine eliminates GIL contention in fast market feeds',
+      'Strict pre-trade risk filter blocks orders exceeding daily loss or margin bounds',
+      'Bar generator accurately aggregates raw ticks without timestamp interpolation drift',
+    ],
+  },
+];
+
+export const INITIAL_QUANT_TEMPLATES: QuantWorkflowTemplate[] = [
+  {
+    id: 'wf-qlib-alpha-ml',
+    title: 'Multi-Factor Alpha Prediction & Risk-Neutralized Portfolio',
+    repoId: 'quant-qlib',
+    repoName: 'microsoft/qlib',
+    description:
+      'Ingests cross-sectional equity OHLCV data, synthesizes 158 technical & fundamental alpha factors, trains a LightGBM regressor with walk-forward validation, and enforces sector-neutral sizing.',
+    targetAssetClass: 'Equities',
+    timeframe: '1D',
+    nodes: [
+      {
+        id: 'node-1',
+        type: 'data_ingest',
+        title: 'Qlib Daily Cross-Sectional Ingest',
+        description: 'Binary format daily bar store covering S&P 500 / CSI 300 universe with survivorship bias elimination.',
+        stageBadge: 'Stage 1: Ingest',
+        parameters: { universe: 'SP500', split_train: '2020-01-01:2024-12-31', split_test: '2025-01-01:2026-10-01' },
+      },
+      {
+        id: 'node-2',
+        type: 'alpha_signals',
+        title: 'Alpha158 Factor Generator',
+        description: 'Computes normalized momentum, volatility, volume ratio, and mean-reversion factor tensors.',
+        stageBadge: 'Stage 2: Features',
+        parameters: { factor_suite: 'Alpha158', standardization: 'zscore', winsorize_quantile: 0.025 },
+      },
+      {
+        id: 'node-3',
+        type: 'strategy_logic',
+        title: 'LightGBM Gradient Boosting Alpha Ranker',
+        description: 'Predicts 5-day forward excess return rankings with L2 regularization and monotonic constraints.',
+        stageBadge: 'Stage 3: Model',
+        parameters: { max_depth: 6, learning_rate: 0.04, num_trees: 350, top_k_long: 30, top_k_short: 30 },
+      },
+      {
+        id: 'node-4',
+        type: 'risk_rules',
+        title: 'Sector-Neutral & Max Drawdown Guard',
+        description: 'Constrains industry net exposure to ±3% and caps gross single-asset leverage at 4.0%.',
+        stageBadge: 'Stage 4: Risk',
+        parameters: { max_drawdown_stop_pct: 7.5, max_sector_tilt_pct: 3.0, single_asset_max_weight: 0.05 },
+      },
+      {
+        id: 'node-5',
+        type: 'ci_regression',
+        title: 'GitHub Actions Strategy Drift CI Gate',
+        description: 'Automated push workflow executing test backtest to prevent Sharpe ratio degradation below 1.5.',
+        stageBadge: 'Stage 5: CI/CD',
+        parameters: { min_sharpe: 1.5, max_drawdown_gate: 8.0, trigger: 'push_main' },
+      },
+    ],
+    generatedPythonStrategy: `"""
+Qlib Alpha158 Quantitative Workflow Strategy
+Grounded in: microsoft/qlib & Artemis CI/CD Invariants
+"""
+import qlib
+from qlib.config import REG_CN
+from qlib.contrib.model.gbdt import LGBModel
+from qlib.contrib.data.handler import Alpha158
+from qlib.contrib.strategy import TopkDropoutStrategy
+from qlib.backtest import backtest, executor
+
+# 1. Initialize Qlib Binary Cache
+qlib.init(provider_uri="~/.qlib/qlib_data/us_data", region="us")
+
+# 2. Configure Alpha Feature Pipeline
+data_handler = Alpha158(
+    instruments="sp500",
+    start_time="2020-01-01",
+    end_time="2026-10-26",
+    fit_start_time="2020-01-01",
+    fit_end_time="2024-12-31"
+)
+
+# 3. Fit LightGBM Alpha Ranker
+model = LGBModel(
+    loss="mse",
+    max_depth=6,
+    learning_rate=0.04,
+    n_estimators=350,
+    colsample_bytree=0.88
+)
+model.fit(dataset=data_handler)
+
+# 4. Enforce Top-K & Risk-Constrained Execution
+strategy = TopkDropoutStrategy(
+    topk=30,
+    n_drop=5,
+    risk_degree=0.95,
+    max_single_weight=0.05
+)
+
+def run_strategy_backtest():
+    portfolio_metrics = backtest(
+        strategy=strategy,
+        executor=executor.SimulatorExecutor(time_per_step="day", generate_report=True),
+        start_time="2025-01-01",
+        end_time="2026-10-26"
+    )
+    assert portfolio_metrics["sharpe"] >= 1.5, "CI Gate Failed: Strategy Sharpe fell below threshold"
+    return portfolio_metrics
+`,
+    generatedCiWorkflow: `name: Quant Strategy Drift Regression CI
+on:
+  push:
+    branches: [main, feat/*]
+  pull_request:
+
+jobs:
+  validate-alpha-workflow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Astral uv & Python 3.11
+        uses: astral-sh/setup-uv@v3
+        with:
+          python-version: "3.11"
+      - name: Install Qlib & Backtest Dependencies
+        run: |
+          uv pip install qlib lightgbm pyyaml numpy scipy pandas pytest
+      - name: Run Strategy Backtest Regression Gate
+        run: |
+          uv run python -c "from strategy_pipeline import run_strategy_backtest; run_strategy_backtest()"
+`,
+    backtestMetrics: {
+      sharpeRatio: 2.14,
+      annualizedReturnPct: 26.8,
+      maxDrawdownPct: 6.4,
+      winRatePct: 58.7,
+      totalTrades: 482,
+      profitFactor: 1.84,
+    },
+  },
+  {
+    id: 'wf-ccxt-stat-arb',
+    title: 'Cross-Exchange Statistical Arbitrage & Real-Time Order Router',
+    repoId: 'quant-ccxt',
+    repoName: 'ccxt/ccxt',
+    description:
+      'Asynchronously streams order book snapshots across Binance, Bybit, and OKX via CCXT.pro WebSocket gateways, detects spread divergences exceeding fee barriers, and executes atomic hedge orders.',
+    targetAssetClass: 'Crypto',
+    timeframe: '1m',
+    nodes: [
+      {
+        id: 'node-c1',
+        type: 'data_ingest',
+        title: 'CCXT Pro WebSocket Streamer',
+        description: 'Multi-exchange async L2 order book aggregator with sub-10ms tick latency.',
+        stageBadge: 'Stage 1: Streaming',
+        parameters: { exchanges: 'binance,bybit,okx', symbols: 'BTC/USDT,ETH/USDT', depth: 20 },
+      },
+      {
+        id: 'node-c2',
+        type: 'alpha_signals',
+        title: 'Microstructure Spread Divergence Model',
+        description: 'Computes real-time triangular and spatial basis divergence net of taker and VIP trading fees.',
+        stageBadge: 'Stage 2: Alpha',
+        parameters: { min_spread_bps: 14.5, fee_buffer_bps: 8.0, lookback_ticks: 60 },
+      },
+      {
+        id: 'node-c3',
+        type: 'strategy_logic',
+        title: 'Concurrent Atomic Leg Router',
+        description: 'Simultaneously fires market buy on Venue A and market sell on Venue B using asyncio.gather.',
+        stageBadge: 'Stage 3: Execution',
+        parameters: { max_clip_usd: 15000, max_slippage_bps: 2.0, cancel_timeout_ms: 250 },
+      },
+      {
+        id: 'node-c4',
+        type: 'risk_rules',
+        title: 'Inventory Imbalance & Hard Kill Switch',
+        description: 'Enforces maximum net delta exposure ($25k) and aborts execution if WebSocket drops for > 500ms.',
+        stageBadge: 'Stage 4: Risk',
+        parameters: { max_inventory_delta_usd: 25000, heartbeat_timeout_ms: 500, emergency_liquidate: true },
+      },
+      {
+        id: 'node-c5',
+        type: 'ci_regression',
+        title: 'Headless Mock Exchange CI Simulation Gate',
+        description: 'Runs mocked WebSocket mock exchange fixture verifying zero unhedged leg executions.',
+        stageBadge: 'Stage 5: CI/CD',
+        parameters: { test_mock_venues: 3, latency_jitter_ms: 5, assert_zero_unhedged: true },
+      },
+    ],
+    generatedPythonStrategy: `"""
+CCXT Pro High-Frequency Cross-Venue Statistical Arbitrage
+Grounded in: ccxt/ccxt & Artemis CI Automation
+"""
+import asyncio
+import ccxt.pro as ccxtpro
+
+async def arbitrage_loop():
+    binance = ccxtpro.binance({"enableRateLimit": True, "options": {"defaultType": "swap"}})
+    bybit = ccxtpro.bybit({"enableRateLimit": True, "options": {"defaultType": "swap"}})
+    symbol = "BTC/USDT:USDT"
+
+    try:
+        while True:
+            orderbook_binance, orderbook_bybit = await asyncio.gather(
+                binance.watch_order_book(symbol, limit=10),
+                bybit.watch_order_book(symbol, limit=10)
+            )
+
+            best_ask_binance = orderbook_binance["asks"][0][0]
+            best_bid_bybit = orderbook_bybit["bids"][0][0]
+            spread_pct = ((best_bid_bybit - best_ask_binance) / best_ask_binance) * 10000
+
+            # Execute if spread exceeds round-trip fee threshold (12 bps)
+            if spread_pct > 12.0:
+                print(f"[ARB TRIGGER] Spread: {spread_pct:.2f} bps! Firing atomic legs...")
+                await asyncio.gather(
+                    binance.create_market_buy_order(symbol, 0.05),
+                    bybit.create_market_sell_order(symbol, 0.05)
+                )
+            await asyncio.sleep(0.01)
+    finally:
+        await binance.close()
+        await bybit.close()
+
+if __name__ == "__main__":
+    asyncio.run(arbitrage_loop())
+`,
+    generatedCiWorkflow: `name: CCXT Arbitrage Execution Smoke Test
+on: [push, pull_request]
+
+jobs:
+  verify-arbitrage-invariants:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          python-version: "3.11"
+      - name: Install CCXT Pro & Pytest
+        run: uv pip install ccxt pytest pytest-asyncio
+      - name: Run Atomic Dual-Leg Execution Suite
+        run: uv run pytest tests/test_ccxt_arbitrage_atomic.py -v
+`,
+    backtestMetrics: {
+      sharpeRatio: 3.42,
+      annualizedReturnPct: 38.4,
+      maxDrawdownPct: 2.9,
+      winRatePct: 76.2,
+      totalTrades: 1240,
+      profitFactor: 2.31,
+    },
+  },
+  {
+    id: 'wf-lean-mean-reversion',
+    title: 'Multi-Asset Mean Reversion with Value-at-Risk (VaR) Gate',
+    repoId: 'quant-lean',
+    repoName: 'QuantConnect/Lean',
+    description:
+      'Implements an event-driven statistical mean reversion strategy over liquid ETF pairs using QuantConnect LEAN, incorporating historical volatility bands and dynamic margin buffers.',
+    targetAssetClass: 'Futures',
+    timeframe: '5m',
+    nodes: [
+      {
+        id: 'node-l1',
+        type: 'data_ingest',
+        title: 'LEAN Tick & Bar Resolution Brokerage Feed',
+        description: 'Interactive Brokers / Alpaca continuous tick aggregator with split & dividend adjustment.',
+        stageBadge: 'Stage 1: Ingest',
+        parameters: { resolution: 'Minute', symbols: 'SPY,QQQ,IWM,TLT', fill_forward: true },
+      },
+      {
+        id: 'node-l2',
+        type: 'alpha_signals',
+        title: 'Adaptive Bollinger Band & RSI Filter',
+        description: 'Calculates dynamic standard deviation channels based on Parkinson intraday volatility.',
+        stageBadge: 'Stage 2: Indicators',
+        parameters: { period: 20, num_std: 2.2, rsi_oversold: 28, rsi_overbought: 72 },
+      },
+      {
+        id: 'node-l3',
+        type: 'risk_rules',
+        title: 'Historical 99% VaR & Trailing Stop Gate',
+        description: 'Restricts intraday portfolio 1-day 99% Value-at-Risk to under 1.8% of net liquidating value.',
+        stageBadge: 'Stage 3: Risk',
+        parameters: { max_var_99_pct: 1.8, trailing_stop_pct: 1.2, max_leverage: 2.0 },
+      },
+      {
+        id: 'node-l4',
+        type: 'backtest_engine',
+        title: 'Event-Driven Backtest Harness',
+        description: 'Simulates slippage, broker commission schedules, and borrow fees for overnight short positions.',
+        stageBadge: 'Stage 4: Engine',
+        parameters: { fee_model: 'InteractiveBrokersFeeModel', slippage_model: 'VolumeShareSlippageModel' },
+      },
+      {
+        id: 'node-l5',
+        type: 'ci_regression',
+        title: 'Push-Triggered Algorithm Backtest Gate',
+        description: 'Automated CI test verifying that code changes maintain Sharpe > 1.8 and Max DD < 5%.',
+        stageBadge: 'Stage 5: CI/CD',
+        parameters: { runner: 'ubuntu-latest', docker_lean: 'quantconnect/lean:latest', timeout_minutes: 10 },
+      },
+    ],
+    generatedPythonStrategy: `"""
+QuantConnect LEAN Python Algorithm: Multi-Asset Adaptive Mean Reversion
+Grounded in: QuantConnect/Lean & Artemis CI Invariants
+"""
+from AlgorithmImports import *
+
+class AdaptiveMeanReversion(QCAlgorithm):
+    def Initialize(self):
+        self.SetStartDate(2023, 1, 1)
+        self.SetCash(100000)
+        self.symbols = [self.AddEquity(ticker, Resolution.Minute).Symbol for ticker in ["SPY", "QQQ", "IWM"]]
+
+        self.bb_indicators = {}
+        self.rsi_indicators = {}
+        for sym in self.symbols:
+            self.bb_indicators[sym] = self.BB(sym, 20, 2.2, MovingAverageType.Simple, Resolution.Minute)
+            self.rsi_indicators[sym] = self.RSI(sym, 14, MovingAverageType.Wilders, Resolution.Minute)
+
+        self.SetRiskManagement(MaximumDrawdownPercentPerSecurity(0.02))
+        self.Schedule.On(self.DateRules.EveryDay("SPY"), self.TimeRules.AfterMarketOpen("SPY", 10), self.Rebalance)
+
+    def Rebalance(self):
+        for sym in self.symbols:
+            if not self.bb_indicators[sym].IsReady:
+                continue
+            price = self.Securities[sym].Price
+            lower = self.bb_indicators[sym].LowerBand.Current.Value
+            upper = self.bb_indicators[sym].UpperBand.Current.Value
+            rsi = self.rsi_indicators[sym].Current.Value
+
+            # Mean-reversion entry
+            if price <= lower and rsi < 30:
+                self.SetHoldings(sym, 0.30)
+            elif price >= upper and rsi > 70:
+                self.Liquidate(sym)
+`,
+    generatedCiWorkflow: `name: LEAN Algorithm Verification CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  run-lean-engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull LEAN Engine Docker Image
+        run: docker pull quantconnect/lean:latest
+      - name: Execute Strategy Backtest Smoke Test
+        run: |
+          docker run --rm -v $(pwd):/app quantconnect/lean:latest backtest /app/strategy
+`,
+    backtestMetrics: {
+      sharpeRatio: 1.98,
+      annualizedReturnPct: 19.4,
+      maxDrawdownPct: 4.8,
+      winRatePct: 64.1,
+      totalTrades: 310,
+      profitFactor: 1.92,
+    },
+  },
+];
+

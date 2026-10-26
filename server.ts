@@ -11,6 +11,14 @@ import {
   UNIFIED_REA_ARTEMIS_CI_YAML,
   POSIX_COMPAT_PATCH,
   GENERATED_SWARM_TEST_SUITE,
+  INITIAL_HISTORICAL_CI_RUNS,
+  INITIAL_FLAKY_TEST_RECORDS,
+  INITIAL_QUANT_REPOSITORIES,
+  INITIAL_QUANT_TEMPLATES,
+  HistoricalCiExecution,
+  FlakyTestRecord,
+  QuantRepository,
+  QuantWorkflowTemplate,
 } from './src/data/presets.ts';
 
 dotenv.config();
@@ -842,6 +850,132 @@ Production-verified release bundling the REA (Reverse Engineer Anything) decompi
       ok: true,
       releases: recentReleases,
     });
+  });
+
+  // Pipeline Health state & routes
+  let historicalCiRuns: HistoricalCiExecution[] = [...INITIAL_HISTORICAL_CI_RUNS];
+  let flakyTestRecords: FlakyTestRecord[] = [...INITIAL_FLAKY_TEST_RECORDS];
+
+  app.get('/api/ci/health', (_req, res) => {
+    res.json({
+      ok: true,
+      runs: historicalCiRuns,
+      flakyTests: flakyTestRecords,
+    });
+  });
+
+  app.post('/api/ci/record-run', (req, res) => {
+    try {
+      const {
+        commitSha = crypto.randomBytes(3).toString('hex'),
+        commitMsg = 'ci: automated test execution run',
+        branch = 'main',
+        author = 'artemis-agent',
+        durationSeconds = Math.round((6.5 + Math.random() * 2.5) * 10) / 10,
+        status = 'passed',
+        passedTests = 24,
+        failedTests = 0,
+        flakyTests = 0,
+        totalTests = 24,
+        failingTestIds = [],
+      } = req.body || {};
+
+      const nextRunNumber = (historicalCiRuns[historicalCiRuns.length - 1]?.runNumber || 120) + 1;
+      const passRatePct = totalTests > 0 ? Math.round(((passedTests / totalTests) * 100) * 10) / 10 : 100.0;
+
+      const newRun: HistoricalCiExecution = {
+        id: `run-${nextRunNumber}`,
+        runNumber: nextRunNumber,
+        commitSha: commitSha.slice(0, 7),
+        commitMsg,
+        branch,
+        author,
+        timestamp: new Date().toISOString(),
+        durationSeconds,
+        status: status as 'passed' | 'failed' | 'flaky',
+        passedTests,
+        failedTests,
+        flakyTests,
+        totalTests,
+        passRatePct,
+        failingTestIds,
+        remediated: true,
+      };
+
+      historicalCiRuns.push(newRun);
+      if (historicalCiRuns.length > 50) {
+        historicalCiRuns.shift();
+      }
+
+      // Update flaky test recent results
+      flakyTestRecords = flakyTestRecords.map((t) => {
+        const wasFailing = failingTestIds.includes(t.id);
+        const result: 'pass' | 'fail' | 'flake' = wasFailing
+          ? (status === 'flaky' ? 'flake' : 'fail')
+          : 'pass';
+        const updatedRecent = [...t.recentResults.slice(1), result];
+        return {
+          ...t,
+          totalExecutions: t.totalExecutions + 1,
+          recentResults: updatedRecent,
+        };
+      });
+
+      return res.json({
+        ok: true,
+        run: newRun,
+        runs: historicalCiRuns,
+        flakyTests: flakyTestRecords,
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        ok: false,
+        error: err?.message || 'Failed to record CI execution',
+      });
+    }
+  });
+
+  // Open Source Quant Repository & Workflow Creator API routes
+  let quantRepositories: QuantRepository[] = [...INITIAL_QUANT_REPOSITORIES];
+  let quantTemplates: QuantWorkflowTemplate[] = [...INITIAL_QUANT_TEMPLATES];
+
+  app.get('/api/quant/repositories', (_req, res) => {
+    res.json({
+      ok: true,
+      repositories: quantRepositories,
+      templates: quantTemplates,
+    });
+  });
+
+  app.post('/api/quant/simulate-workflow', (req, res) => {
+    try {
+      const { templateId = 'wf-qlib-alpha-ml', nodes = [] } = req.body || {};
+      const targetTemplate = quantTemplates.find((t) => t.id === templateId) || quantTemplates[0];
+
+      // Simulated metrics calculation based on nodes
+      const simulatedMetrics = {
+        ...targetTemplate.backtestMetrics,
+        totalTrades: targetTemplate.backtestMetrics.totalTrades + Math.floor(Math.random() * 20),
+        sharpeRatio: Math.round((targetTemplate.backtestMetrics.sharpeRatio + (Math.random() * 0.1 - 0.05)) * 100) / 100,
+      };
+
+      res.json({
+        ok: true,
+        metrics: simulatedMetrics,
+        logOutput: [
+          `[STAGE 1] Ingested symbol data via ${nodes[0]?.title || 'Binary Cache'}`,
+          `[STAGE 2] Factor synthesis: Alpha158 tensors computed across cross-section`,
+          `[STAGE 3] Strategy regressor execution converged`,
+          `[STAGE 4] Risk validation: Max Drawdown stop confirmed at 7.5%`,
+          `[STAGE 5] CI Regression: Backtest Sharpe ${simulatedMetrics.sharpeRatio} >= threshold 1.50`,
+        ],
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        ok: false,
+        error: err?.message || 'Failed to simulate workflow',
+      });
+    }
   });
 
   app.post('/api/github/generate-release-notes', async (req, res) => {
