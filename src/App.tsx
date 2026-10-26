@@ -20,6 +20,10 @@ import {
   Webhook,
   KeyRound,
   Activity,
+  Tag,
+  Sparkles,
+  PackageCheck,
+  FileText,
 } from 'lucide-react';
 import {
   INITIAL_ARTEMIS_REA_REPORT,
@@ -169,6 +173,75 @@ export default function App() {
       durationMs: 1240,
       timestamp: '2026-10-25T23:14:00Z',
       summary: 'HMAC-SHA256 verified. Executed REA AST diff + Artemis headless ADB suite (22/22 passed).',
+    },
+  ]);
+
+  // Release Automation states
+  const [releaseTagName, setReleaseTagName] = useState<string>('v0.4.3');
+  const [releaseName, setReleaseName] = useState<string>('v0.4.3: Automated Push CI/CD & REA Decompiler Matrix');
+  const [releaseTargetCommitish, setReleaseTargetCommitish] = useState<string>('main');
+  const [releaseIsDraft, setReleaseIsDraft] = useState<boolean>(false);
+  const [releaseIsPrerelease, setReleaseIsPrerelease] = useState<boolean>(false);
+  const [releaseNotes, setReleaseNotes] = useState<string>(`## Release v0.4.3 — Artemis & REA Swarm
+
+### Executive Summary
+Production-grade automated release for **google/artemis** incorporating the REA (Reverse Engineer Anything) decompiler bridge.
+All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and Linux POSIX subprocess compatibility.
+
+### CI/CD Remediations & Push Invariants
+- **Unrestricted Push CI**: Removed \`workflow_dispatch\` blocking gate so tests run on all branch commits.
+- **POSIX Runner Shim**: Installed \`mcp_server/utils/posix_compat.py\` preventing Linux runner \`AttributeError\` on Windows subprocess constants.
+- **Automated Matrix**: Verified REA AST symbol extractor and Artemis headless ADB suite.
+
+### Reverse-Engineered MCP Endpoints
+- \`rea_extract_control_flow\`: Binary/AST decompiler symbol extractor.
+- \`artemis_execute_device_action\`: Android ADB natural-language execution bridge.
+- \`swarm_synthesize_regression_test\`: Autonomous regression synthesis for continuous verification.
+
+### Packaged Distribution Artifacts
+- \`artemis_rea_swarm-0.4.3-py3-none-any.whl\` (1.4 MB)
+- \`.github/workflows/ci.yml\` (3.8 KB)
+- \`posix_compat.py\` (1.2 KB)`);
+  const [isGeneratingReleaseNotes, setIsGeneratingReleaseNotes] = useState<boolean>(false);
+  const [isCreatingRelease, setIsCreatingRelease] = useState<boolean>(false);
+  const [releaseSuccessNote, setReleaseSuccessNote] = useState<string | null>(null);
+  const [releaseError, setReleaseError] = useState<string | null>(null);
+  const [copiedReleaseNotes, setCopiedReleaseNotes] = useState<boolean>(false);
+  const [recentReleases, setRecentReleases] = useState<
+    Array<{
+      id: string;
+      tagName: string;
+      releaseName: string;
+      repository: string;
+      targetCommitish: string;
+      body: string;
+      draft: boolean;
+      prerelease: boolean;
+      htmlUrl: string;
+      createdAt: string;
+      publishedAt: string;
+      ciStatus: string;
+      artifacts: Array<{ name: string; size: string; type: string }>;
+    }>
+  >([
+    {
+      id: 'rel-1',
+      tagName: 'v0.4.2',
+      releaseName: 'v0.4.2: Automated Push CI/CD & REA Decompiler Bridge',
+      repository: 'google/artemis',
+      targetCommitish: 'main',
+      body: `## Summary\nProduction-verified release bundling the REA (Reverse Engineer Anything) decompiler bridge with Google Artemis MCP automation.\n\n### Verified CI/CD Status\n- **Static Audit & POSIX Gate**: Passed (Ruff linter + device_utils POSIX shim)\n- **REA & Artemis MCP Swarm Verification**: Passed (22/22 unit and matrix tests)\n- **Automated Deployment**: Verified wheel distribution and isolated smoke test\n\n### Key Remediations\n- **CI-01**: Removed workflow_dispatch gating so all test suites run on push.\n- **CI-02**: Implemented posix_compat.py to prevent AttributeError on Linux runners.\n- **CI-03**: Automated release packaging with uv build --wheel.`,
+      draft: false,
+      prerelease: false,
+      htmlUrl: 'https://github.com/google/artemis/releases/tag/v0.4.2',
+      createdAt: '2026-10-25T23:14:42Z',
+      publishedAt: '2026-10-25T23:15:10Z',
+      ciStatus: '5/5 Passing (All Matrix Suites)',
+      artifacts: [
+        { name: 'artemis_rea_swarm-0.4.2-py3-none-any.whl', size: '1.4 MB', type: 'Python Wheel' },
+        { name: '.github/workflows/ci.yml', size: '3.8 KB', type: 'CI/CD Pipeline' },
+        { name: 'posix_compat.py', size: '1.2 KB', type: 'POSIX Compatibility Shim' },
+      ],
     },
   ]);
 
@@ -504,6 +577,87 @@ export default function App() {
     }
   };
 
+  const handleGenerateReleaseNotes = async () => {
+    setIsGeneratingReleaseNotes(true);
+    setReleaseError(null);
+    setReleaseSuccessNote(null);
+
+    try {
+      const res = await fetch('/api/github/generate-release-notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repoName: targetDeployRepo || report.repoFullName.split(' ')[0] || 'google/artemis',
+          tagName: releaseTagName,
+          commitSha: 'a4c91e8',
+          reportSummary: report.executiveSummary,
+          ciIssuesResolved: report.ciIssuesResolved,
+          mcpContracts: report.mcpContracts,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Failed to synthesize release notes');
+      }
+
+      setReleaseNotes(data.releaseNotes);
+      setReleaseSuccessNote('Release notes synthesized by Lead Release Agent from current CI/CD passing gates and MCP topology.');
+    } catch (err: any) {
+      setReleaseError(err?.message || 'Failed to generate release notes');
+    } finally {
+      setIsGeneratingReleaseNotes(false);
+    }
+  };
+
+  const handleCreateRelease = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsCreatingRelease(true);
+    setReleaseError(null);
+    setReleaseSuccessNote(null);
+
+    try {
+      const res = await fetch('/api/github/create-release', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetRepo: targetDeployRepo || report.repoFullName.split(' ')[0] || 'google/artemis',
+          tagName: releaseTagName,
+          releaseName,
+          targetCommitish: releaseTargetCommitish,
+          releaseNotes,
+          isDraft: releaseIsDraft,
+          isPrerelease: releaseIsPrerelease,
+          githubToken: githubPat || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Failed to create release');
+      }
+
+      if (Array.isArray(data.releases)) {
+        setRecentReleases(data.releases);
+      }
+      setReleaseSuccessNote(data.note || `Release ${data.release?.tagName} successfully published!`);
+    } catch (err: any) {
+      setReleaseError(err?.message || 'Failed to publish release');
+    } finally {
+      setIsCreatingRelease(false);
+    }
+  };
+
+  const handleCopyReleaseNotes = async () => {
+    try {
+      await navigator.clipboard.writeText(releaseNotes);
+      setCopiedReleaseNotes(true);
+      setTimeout(() => setCopiedReleaseNotes(false), 1800);
+    } catch {
+      // Ignore clipboard failure
+    }
+  };
+
   const activePipelineStep = useMemo(
     () => DEFAULT_PIPELINE_STEPS.find((s) => s.id === activeStepId) || DEFAULT_PIPELINE_STEPS[0],
     [activeStepId]
@@ -530,31 +684,31 @@ export default function App() {
             href="#ci-pipeline"
             className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
           >
-            Pipeline &amp; CI/CD
+            Pipeline &amp; CI
           </a>
           <a
             href="#architecture"
             className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
           >
-            Swarm Architecture
+            Architecture
           </a>
           <a
             href="#trust-group"
             className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
           >
-            Trust-Group Playbook
-          </a>
-          <a
-            href="#github-deploy"
-            className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
-          >
-            Deploy to GitHub
+            Trust Group
           </a>
           <a
             href="#webhook-registration"
             className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
           >
             Webhooks
+          </a>
+          <a
+            href="#release-automation"
+            className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
+          >
+            Releases
           </a>
         </nav>
 
@@ -1707,6 +1861,315 @@ git push origin main`}</code>
             </div>
           </div>
         </section>
+
+        {/* Section 06: Release Automation */}
+        <section id="release-automation" className="space-y-6 scroll-mt-20">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-800 pb-4">
+            <div className="space-y-1">
+              <h2 className="text-xl font-bold text-white font-display">
+                06. Release Automation
+              </h2>
+              <p className="text-sm text-slate-400">
+                Trigger automated GitHub releases grounded in passing CI/CD matrix stages (5/5 gates) and synthesized
+                reverse-engineered findings.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400 shrink-0">
+              <span className="text-emerald-400 font-medium flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>CI/CD Status: 5/5 Passing Gates</span>
+              </span>
+              <span aria-hidden="true" className="text-slate-600">·</span>
+              <span className="font-mono tabular-nums">Ref: a4c91e8</span>
+              <span aria-hidden="true" className="text-slate-600">·</span>
+              <span className="font-mono tabular-nums">Target Tag: {releaseTagName}</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Left 6 Cols: Release Parameters & Trigger Controls */}
+            <form
+              onSubmit={handleCreateRelease}
+              className="lg:col-span-6 bg-[#111827] border border-slate-800 rounded-xl p-6 space-y-5"
+            >
+              <div className="space-y-1">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <Tag className="w-4 h-4 text-emerald-400" />
+                  <span>Release Metadata &amp; Target Repository</span>
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Tags and commits are published to GitHub using your credentials or recorded in the Swarm Release
+                  Registry.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label htmlFor="release-tag-input" className="block text-xs font-medium text-slate-300">
+                    Release Tag
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="release-tag-input"
+                      type="text"
+                      required
+                      value={releaseTagName}
+                      onChange={(e) => setReleaseTagName(e.target.value)}
+                      placeholder="v0.4.3"
+                      className="w-full px-3.5 py-2 text-xs font-mono bg-[#0b0f17] border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-400"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const parts = releaseTagName.replace(/^v/, '').split('.').map(Number);
+                        if (parts.length === 3 && !isNaN(parts[2])) {
+                          setReleaseTagName(`v${parts[0]}.${parts[1]}.${parts[2] + 1}`);
+                          setReleaseName(`v${parts[0]}.${parts[1]}.${parts[2] + 1}: Automated Push CI/CD & REA Decompiler Matrix`);
+                        }
+                      }}
+                      className="px-2.5 py-2 text-xs font-mono text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                      title="Bump Patch Version"
+                    >
+                      +Patch
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="release-target-commitish" className="block text-xs font-medium text-slate-300">
+                    Target Branch or Commit SHA
+                  </label>
+                  <input
+                    id="release-target-commitish"
+                    type="text"
+                    required
+                    value={releaseTargetCommitish}
+                    onChange={(e) => setReleaseTargetCommitish(e.target.value)}
+                    placeholder="main"
+                    className="w-full px-3.5 py-2 text-xs font-mono bg-[#0b0f17] border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-400"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="release-title-input" className="block text-xs font-medium text-slate-300">
+                  Release Title
+                </label>
+                <input
+                  id="release-title-input"
+                  type="text"
+                  required
+                  value={releaseName}
+                  onChange={(e) => setReleaseName(e.target.value)}
+                  placeholder="v0.4.3: Automated Push CI/CD & REA Decompiler Matrix"
+                  className="w-full px-3.5 py-2 text-xs bg-[#0b0f17] border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-400"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="release-repo-input" className="block text-xs font-medium text-slate-300">
+                  Target GitHub Repository (owner/repo)
+                </label>
+                <input
+                  id="release-repo-input"
+                  type="text"
+                  value={targetDeployRepo || report.repoFullName.split(' ')[0] || 'google/artemis'}
+                  onChange={(e) => setTargetDeployRepo(e.target.value)}
+                  placeholder="google/artemis"
+                  className="w-full px-3.5 py-2 text-xs font-mono bg-[#0b0f17] border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-400"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-6 pt-1 text-xs text-slate-300">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={releaseIsPrerelease}
+                    onChange={(e) => setReleaseIsPrerelease(e.target.checked)}
+                    className="rounded border-slate-700 text-emerald-500 focus:ring-0 bg-[#0b0f17]"
+                  />
+                  <span>Mark as Pre-release</span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={releaseIsDraft}
+                    onChange={(e) => setReleaseIsDraft(e.target.checked)}
+                    className="rounded border-slate-700 text-emerald-500 focus:ring-0 bg-[#0b0f17]"
+                  />
+                  <span>Save as Draft</span>
+                </label>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={handleGenerateReleaseNotes}
+                  disabled={isGeneratingReleaseNotes}
+                  className="px-4 py-2.5 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>{isGeneratingReleaseNotes ? 'Synthesizing Notes...' : 'Synthesize Notes with Swarm'}</span>
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={isCreatingRelease}
+                  className="px-4 py-2.5 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-60 rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <PackageCheck className="w-3.5 h-3.5" />
+                  <span>{isCreatingRelease ? 'Publishing Release...' : 'Publish GitHub Release'}</span>
+                </button>
+              </div>
+
+              {(releaseSuccessNote || releaseError) && (
+                <div className="pt-2 text-xs">
+                  {releaseError ? (
+                    <div className="flex items-center gap-2 text-amber-400">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <span>{releaseError}</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-emerald-400">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      <span>{releaseSuccessNote}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </form>
+
+            {/* Right 6 Cols: Release Notes Editor & Packaged Artifacts */}
+            <div className="lg:col-span-6 bg-[#111827] border border-slate-800 rounded-xl p-6 flex flex-col justify-between space-y-4">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs text-slate-300 font-semibold">
+                    <FileText className="w-4 h-4 text-emerald-400" />
+                    <span>Synthesized Release Changelog</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleCopyReleaseNotes}
+                    className="px-3 py-1.5 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    {copiedReleaseNotes ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy Notes</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <textarea
+                  rows={9}
+                  value={releaseNotes}
+                  onChange={(e) => setReleaseNotes(e.target.value)}
+                  className="w-full p-3 text-xs font-mono bg-[#0b0f17] border border-slate-700 rounded-lg text-slate-200 focus:outline-none focus:border-emerald-400 leading-relaxed"
+                />
+
+                <div className="space-y-2 pt-2 border-t border-slate-800">
+                  <span className="text-xs font-semibold text-slate-200">
+                    Distribution Artifacts Included in Release
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="p-3 bg-[#0b0f17] border border-slate-800 rounded-lg space-y-1 text-xs">
+                      <div className="font-mono text-emerald-400 truncate">artemis_rea_swarm.whl</div>
+                      <div className="text-slate-400 font-mono tabular-nums">1.4 MB · Wheel</div>
+                    </div>
+                    <div className="p-3 bg-[#0b0f17] border border-slate-800 rounded-lg space-y-1 text-xs">
+                      <div className="font-mono text-slate-200 truncate">.github/workflows/ci.yml</div>
+                      <div className="text-slate-400 font-mono tabular-nums">3.8 KB · Pipeline</div>
+                    </div>
+                    <div className="p-3 bg-[#0b0f17] border border-slate-800 rounded-lg space-y-1 text-xs">
+                      <div className="font-mono text-slate-200 truncate">posix_compat.py</div>
+                      <div className="text-slate-400 font-mono tabular-nums">1.2 KB · POSIX Shim</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Release History & Registry */}
+          <div className="bg-[#111827] border border-slate-800 rounded-xl overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-200">
+                Release Registry &amp; Verified Deployment History
+              </span>
+              <span className="text-xs text-slate-400 font-mono tabular-nums">
+                {recentReleases.length} releases logged
+              </span>
+            </div>
+
+            <div className="divide-y divide-slate-800/80">
+              {recentReleases.map((rel) => (
+                <div key={rel.id} className="p-5 grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
+                  <div className="lg:col-span-3 space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-semibold text-emerald-400 text-sm">{rel.tagName}</span>
+                      {rel.prerelease && (
+                        <span className="text-xs font-mono text-amber-400 border border-amber-500/40 px-1.5 py-0.5 rounded">
+                          pre-release
+                        </span>
+                      )}
+                      {rel.draft && (
+                        <span className="text-xs font-mono text-slate-400 border border-slate-600 px-1.5 py-0.5 rounded">
+                          draft
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-400 font-mono">{rel.repository}</div>
+                  </div>
+
+                  <div className="lg:col-span-5 space-y-1">
+                    <div className="text-xs font-semibold text-white truncate">{rel.releaseName}</div>
+                    <div className="text-xs text-slate-400 flex items-center gap-2">
+                      <span className="text-emerald-400">{rel.ciStatus}</span>
+                      <span aria-hidden="true" className="text-slate-600">·</span>
+                      <span className="font-mono tabular-nums">Target: {rel.targetCommitish}</span>
+                      <span aria-hidden="true" className="text-slate-600">·</span>
+                      <span className="font-mono tabular-nums">{rel.publishedAt.slice(0, 10)}</span>
+                    </div>
+                  </div>
+
+                  <div className="lg:col-span-4 flex items-center justify-end gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReleaseNotes(rel.body);
+                        setReleaseTagName(rel.tagName);
+                        setReleaseName(rel.releaseName);
+                        setReleaseTargetCommitish(rel.targetCommitish);
+                      }}
+                      className="px-3 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors cursor-pointer"
+                    >
+                      Load Notes
+                    </button>
+
+                    <a
+                      href={rel.htmlUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-1.5 text-xs font-medium text-emerald-400 hover:text-emerald-300 bg-emerald-950/40 hover:bg-emerald-950/70 border border-emerald-500/40 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <span>View Release</span>
+                      <ArrowUpRight className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
       </main>
 
       {/* Quiet Footer */}
@@ -1728,6 +2191,10 @@ git push origin main`}</code>
             <span aria-hidden="true">·</span>
             <a href="#webhook-registration" className="hover:text-slate-300 transition-colors">
               Webhooks
+            </a>
+            <span aria-hidden="true">·</span>
+            <a href="#release-automation" className="hover:text-slate-300 transition-colors">
+              Releases
             </a>
           </div>
         </div>
