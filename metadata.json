@@ -2,5 +2,7 @@
   "name": "Artemis & REA Swarm Studio",
   "description": "Tactical reverse-engineering agent swarm and automated CI/CD pipeline orchestrator for Google Artemis and REA repositories.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

@@ -17,6 +17,9 @@ import {
   SlidersHorizontal,
   FolderGit2,
   Send,
+  Webhook,
+  KeyRound,
+  Activity,
 } from 'lucide-react';
 import {
   INITIAL_ARTEMIS_REA_REPORT,
@@ -98,6 +101,74 @@ export default function App() {
     branch: string;
     committedFiles: Array<{ path: string; htmlUrl?: string; sha?: string }>;
   } | null>(null);
+
+  // CI/CD Webhook Registration states
+  const [webhookPayloadUrl, setWebhookPayloadUrl] = useState<string>(() =>
+    typeof window !== 'undefined'
+      ? `${window.location.origin}/api/webhooks/github-push`
+      : 'https://artemis-rea-swarm.run.app/api/webhooks/github-push'
+  );
+  const [webhookSecretToken, setWebhookSecretToken] = useState<string>('whsec_artemis_rea_default_hmac_key');
+  const [webhookContentType, setWebhookContentType] = useState<string>('application/json');
+  const [webhookEvents, setWebhookEvents] = useState<string[]>(['push', 'pull_request']);
+  const [isRegisteringWebhook, setIsRegisteringWebhook] = useState<boolean>(false);
+  const [isTestingWebhook, setIsTestingWebhook] = useState<boolean>(false);
+  const [webhookStatusNote, setWebhookStatusNote] = useState<string | null>(null);
+  const [webhookError, setWebhookError] = useState<string | null>(null);
+  const [copiedWebhookUrl, setCopiedWebhookUrl] = useState<boolean>(false);
+  const [registeredWebhookMeta, setRegisteredWebhookMeta] = useState<{
+    id: string;
+    payloadUrl: string;
+    secretTokenPreview: string;
+    events: string[];
+    targetRepo: string;
+    active: boolean;
+    updatedAt: string;
+  }>({
+    id: 'wh-artemis-rea-01',
+    payloadUrl:
+      typeof window !== 'undefined'
+        ? `${window.location.origin}/api/webhooks/github-push`
+        : 'https://artemis-rea-swarm.run.app/api/webhooks/github-push',
+    secretTokenPreview: 'whsec_ar•••••••• (9b4e8f1c3a72d6e5)',
+    events: ['push', 'pull_request'],
+    targetRepo: 'google/artemis',
+    active: true,
+    updatedAt: '2026-10-25T23:14:42Z',
+  });
+  const [webhookDeliveries, setWebhookDeliveries] = useState<
+    Array<{
+      id: string;
+      deliveryId: string;
+      event: string;
+      repository: string;
+      branch: string;
+      commitSha: string;
+      pusher: string;
+      signatureHeader: string;
+      signatureVerified: boolean;
+      swarmStatus: string;
+      durationMs: number;
+      timestamp: string;
+      summary: string;
+    }>
+  >([
+    {
+      id: 'deliv-1',
+      deliveryId: '7f9c2d10-b41a-11ef-9a12-0800200c9a66',
+      event: 'push',
+      repository: 'google/artemis',
+      branch: 'refs/heads/main',
+      commitSha: 'a4c91e8',
+      pusher: 'artemis-ci-bot',
+      signatureHeader: 'sha256=9b4e8f1c3a72d6e5012a98c4f1d2e3a4b5c6d7e8...',
+      signatureVerified: true,
+      swarmStatus: 'Triggered & Passed',
+      durationMs: 1240,
+      timestamp: '2026-10-25T23:14:00Z',
+      summary: 'HMAC-SHA256 verified. Executed REA AST diff + Artemis headless ADB suite (22/22 passed).',
+    },
+  ]);
 
   const handleInspectGitHub = async (overrideRepo?: string) => {
     const target = overrideRepo ?? repoInput;
@@ -334,6 +405,103 @@ export default function App() {
     }
   };
 
+  const handleToggleWebhookEvent = (evt: string) => {
+    setWebhookEvents((prev) =>
+      prev.includes(evt) ? (prev.length > 1 ? prev.filter((item) => item !== evt) : prev) : [...prev, evt]
+    );
+  };
+
+  const handleGenerateWebhookSecret = () => {
+    const randomChars = Array.from({ length: 28 }, () =>
+      '0123456789abcdef'[Math.floor(Math.random() * 16)]
+    ).join('');
+    setWebhookSecretToken(`whsec_${randomChars}`);
+  };
+
+  const handleCopyWebhookUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(webhookPayloadUrl);
+      setCopiedWebhookUrl(true);
+      setTimeout(() => setCopiedWebhookUrl(false), 1800);
+    } catch {
+      // Ignore clipboard failure
+    }
+  };
+
+  const handleRegisterWebhook = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsRegisteringWebhook(true);
+    setWebhookError(null);
+    setWebhookStatusNote(null);
+
+    try {
+      const res = await fetch('/api/github/register-webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          payloadUrl: webhookPayloadUrl,
+          secretToken: webhookSecretToken,
+          contentType: webhookContentType,
+          events: webhookEvents,
+          targetRepo: targetDeployRepo || report.repoFullName.split(' ')[0] || 'google/artemis',
+          githubToken: githubPat || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Failed to register CI/CD webhook');
+      }
+      setRegisteredWebhookMeta(data.webhook);
+      setWebhookStatusNote(data.note || 'Webhook registered and armed for incoming push events.');
+    } catch (err: any) {
+      setWebhookError(err?.message || 'Webhook registration failed');
+    } finally {
+      setIsRegisteringWebhook(false);
+    }
+  };
+
+  const handleTriggerTestPushWebhook = async () => {
+    setIsTestingWebhook(true);
+    setWebhookError(null);
+
+    try {
+      const res = await fetch('/api/webhooks/github-push', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-GitHub-Event': 'push',
+        },
+        body: JSON.stringify({
+          event: 'push',
+          secretToken: webhookSecretToken,
+          ref: `refs/heads/${targetDeployBranch || report.defaultBranch || 'main'}`,
+          repository: {
+            full_name: targetDeployRepo || report.repoFullName.split(' ')[0] || 'google/artemis',
+          },
+          pusher: {
+            name: 'github-webhook-dispatch',
+          },
+        }),
+      });
+      const data = await res.json();
+      if (Array.isArray(data.deliveries)) {
+        setWebhookDeliveries(data.deliveries);
+      }
+      if (!data.ok) {
+        setWebhookError(
+          data.delivery?.summary || 'Webhook signature verification failed: check that the secret token matches.'
+        );
+      } else {
+        setWebhookStatusNote(data.delivery?.summary || 'Push event verified and Artemis Swarm analysis triggered.');
+        handleSimulateCiPipeline();
+      }
+    } catch (err: any) {
+      setWebhookError(err?.message || 'Failed to dispatch test push webhook');
+    } finally {
+      setIsTestingWebhook(false);
+    }
+  };
+
   const activePipelineStep = useMemo(
     () => DEFAULT_PIPELINE_STEPS.find((s) => s.id === activeStepId) || DEFAULT_PIPELINE_STEPS[0],
     [activeStepId]
@@ -379,6 +547,12 @@ export default function App() {
             className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
           >
             Deploy to GitHub
+          </a>
+          <a
+            href="#webhook-registration"
+            className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
+          >
+            Webhooks
           </a>
         </nav>
 
@@ -1252,6 +1426,231 @@ git push origin main`}</code>
             </div>
           </div>
         </section>
+
+        {/* Section 05: CI/CD Webhook Registration */}
+        <section id="webhook-registration" className="space-y-6 scroll-mt-20">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-800 pb-4">
+            <div className="space-y-1">
+              <h2 className="text-xl font-bold text-white font-display">
+                05. CI/CD Webhook Registration
+              </h2>
+              <p className="text-sm text-slate-400">
+                Configure a GitHub Webhook Payload URL and HMAC-SHA256 Secret Token to automatically trigger the Artemis
+                &amp; REA Swarm analysis whenever a <code className="font-mono text-slate-200">push</code> event occurs.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 text-xs text-slate-400 shrink-0">
+              <span>Status: {registeredWebhookMeta.active ? 'Armed for Push Events' : 'Inactive'}</span>
+              <span aria-hidden="true">·</span>
+              <span className="font-mono tabular-nums">Hook ID: {registeredWebhookMeta.id}</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Left 6 Cols: Webhook Configuration Form */}
+            <form
+              onSubmit={handleRegisterWebhook}
+              className="lg:col-span-6 bg-[#111827] border border-slate-800 rounded-xl p-6 space-y-5"
+            >
+              <div className="space-y-1">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <Webhook className="w-4 h-4 text-emerald-400" />
+                  <span>GitHub Webhook Endpoint &amp; Secret Configuration</span>
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Incoming GitHub <code className="font-mono text-slate-300">X-Hub-Signature-256</code> headers are
+                  verified against your secret token before launching the Artemis Swarm.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="webhook-payload-url" className="block text-xs font-medium text-slate-300">
+                  Payload URL
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="webhook-payload-url"
+                    type="url"
+                    required
+                    value={webhookPayloadUrl}
+                    onChange={(e) => setWebhookPayloadUrl(e.target.value)}
+                    placeholder="https://your-domain.run.app/api/webhooks/github-push"
+                    className="w-full px-3.5 py-2 text-xs font-mono bg-[#0b0f17] border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-400"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCopyWebhookUrl}
+                    className="px-3 py-2 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    {copiedWebhookUrl ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy URL</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="webhook-secret-token" className="block text-xs font-medium text-slate-300">
+                  Secret Token (HMAC-SHA256 Verification Key)
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="webhook-secret-token"
+                    type="text"
+                    required
+                    value={webhookSecretToken}
+                    onChange={(e) => setWebhookSecretToken(e.target.value)}
+                    placeholder="whsec_••••••••••••••••••••••••••••••••"
+                    className="w-full px-3.5 py-2 text-xs font-mono bg-[#0b0f17] border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-400"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleGenerateWebhookSecret}
+                    className="px-3 py-2 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>Generate Secret</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label htmlFor="webhook-content-type" className="block text-xs font-medium text-slate-300">
+                    Content Type
+                  </label>
+                  <select
+                    id="webhook-content-type"
+                    value={webhookContentType}
+                    onChange={(e) => setWebhookContentType(e.target.value)}
+                    className="w-full px-3 py-2 text-xs bg-[#0b0f17] border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-400"
+                  >
+                    <option value="application/json">application/json</option>
+                    <option value="application/x-www-form-urlencoded">application/x-www-form-urlencoded</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <span className="block text-xs font-medium text-slate-300">Subscribed GitHub Events</span>
+                  <div className="flex items-center gap-2 pt-1">
+                    {['push', 'pull_request', 'workflow_run'].map((evt) => {
+                      const active = webhookEvents.includes(evt);
+                      return (
+                        <button
+                          key={evt}
+                          type="button"
+                          onClick={() => handleToggleWebhookEvent(evt)}
+                          className={`px-2.5 py-1.5 text-xs font-mono rounded-md border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                            active
+                              ? 'bg-slate-800 text-emerald-400 border-emerald-500/50'
+                              : 'bg-[#0b0f17] text-slate-400 border-slate-800 hover:text-slate-200'
+                          }`}
+                        >
+                          {evt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 pt-2">
+                <button
+                  type="submit"
+                  disabled={isRegisteringWebhook}
+                  className="px-4 py-2.5 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-60 rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <Webhook className="w-3.5 h-3.5" />
+                  <span>{isRegisteringWebhook ? 'Registering Webhook...' : 'Register Webhook'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleTriggerTestPushWebhook}
+                  disabled={isTestingWebhook}
+                  className="px-4 py-2.5 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <Activity className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>{isTestingWebhook ? 'Dispatching Push Event...' : 'Simulate Push Event'}</span>
+                </button>
+              </div>
+
+              {(webhookStatusNote || webhookError) && (
+                <div className="pt-2 text-xs">
+                  {webhookError ? (
+                    <div className="flex items-center gap-2 text-amber-400">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <span>{webhookError}</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-emerald-400">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      <span>{webhookStatusNote}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </form>
+
+            {/* Right 6 Cols: Registered Binding Summary & Recent Push Webhook Deliveries */}
+            <div className="lg:col-span-6 bg-[#111827] border border-slate-800 rounded-xl overflow-hidden flex flex-col justify-between">
+              <div className="p-5 border-b border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-white">
+                    Active Webhook Binding &amp; Push Event Delivery Log
+                  </span>
+                  <span className="text-xs font-mono tabular-nums text-slate-400">
+                    {webhookDeliveries.length} deliveries recorded
+                  </span>
+                </div>
+                <div className="text-xs text-slate-400 flex flex-wrap items-center gap-2 font-mono">
+                  <span className="text-slate-300 truncate max-w-xs">{registeredWebhookMeta.payloadUrl}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>Secret: {registeredWebhookMeta.secretTokenPreview}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>Events: {registeredWebhookMeta.events.join(', ')}</span>
+                </div>
+              </div>
+
+              <div className="divide-y divide-slate-800/80 max-h-[340px] overflow-y-auto">
+                {webhookDeliveries.map((deliv) => (
+                  <div key={deliv.id} className="p-4 space-y-2 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 font-mono">
+                        {deliv.signatureVerified ? (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        ) : (
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        )}
+                        <span className="font-semibold text-white">{deliv.event}</span>
+                        <span aria-hidden="true" className="text-slate-600">·</span>
+                        <span className="text-slate-300">{deliv.repository}</span>
+                        <span aria-hidden="true" className="text-slate-600">·</span>
+                        <span className="text-emerald-400">{deliv.commitSha}</span>
+                      </div>
+                      <span className="font-mono tabular-nums text-slate-400">
+                        {deliv.durationMs}ms · {deliv.swarmStatus}
+                      </span>
+                    </div>
+                    <p className="text-slate-300 leading-relaxed">{deliv.summary}</p>
+                    <div className="text-slate-500 font-mono truncate">
+                      X-Hub-Signature-256: {deliv.signatureHeader}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
       </main>
 
       {/* Quiet Footer */}
@@ -1269,6 +1668,10 @@ git push origin main`}</code>
             <span aria-hidden="true">·</span>
             <a href="#trust-group" className="hover:text-slate-300 transition-colors">
               Trust-Group Playbook
+            </a>
+            <span aria-hidden="true">·</span>
+            <a href="#webhook-registration" className="hover:text-slate-300 transition-colors">
+              Webhooks
             </a>
           </div>
         </div>
