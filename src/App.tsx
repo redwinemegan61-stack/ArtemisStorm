@@ -28,6 +28,7 @@ import {
   ArchitectureNode,
   TrustGroupSop,
 } from './data/presets';
+import ModuleTopologyGraph, { TopologyGraphNode } from './components/ModuleTopologyGraph';
 
 type ArtifactTab = 'unified-ci' | 'posix-patch' | 'pytest-suite' | 'original-ci';
 type TierFilter = 'All' | 'Supervisor' | 'MCP Core' | 'Decompiler Bridge' | 'Device Automation' | 'CI/CD Gate';
@@ -69,12 +70,13 @@ export default function App() {
   const [activeArtifactTab, setActiveArtifactTab] = useState<ArtifactTab>('unified-ci');
   const [copiedArtifact, setCopiedArtifact] = useState<boolean>(false);
 
-  // Architecture table states
+  // Architecture table & D3 topology graph states
   const [archSearch, setArchSearch] = useState<string>('');
   const [archTierFilter, setArchTierFilter] = useState<TierFilter>('All');
   const [selectedNode, setSelectedNode] = useState<ArchitectureNode | null>(
     INITIAL_ARTEMIS_REA_REPORT.architectureNodes[1]
   );
+  const [selectedGraphItem, setSelectedGraphItem] = useState<TopologyGraphNode | null>(null);
 
   // Sub-agent trainer states
   const [trainTaskInput, setTrainTaskInput] = useState<string>(
@@ -1024,63 +1026,49 @@ export default function App() {
             </div>
           </div>
 
+          {/* D3 Force-Directed Topology Graph + Synchronized Node Inspector */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* Module Data Grid (8 columns) */}
-            <div className="lg:col-span-8 bg-[#111827] border border-slate-800 rounded-xl overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-800 text-xs font-semibold text-slate-400 bg-[#0b0f17]/50">
-                      <th className="py-3 px-4">Module Path</th>
-                      <th className="py-3 px-4">Swarm Tier</th>
-                      <th className="py-3 px-4">Complexity</th>
-                      <th className="py-3 px-4">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/80 text-xs">
-                    {filteredArchitectureNodes.length === 0 ? (
-                      <tr>
-                        <td colSpan={4} className="py-8 text-center text-slate-400">
-                          No architecture modules match your current filter.{' '}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setArchSearch('');
-                              setArchTierFilter('All');
-                            }}
-                            className="text-emerald-400 underline ml-1 cursor-pointer"
-                          >
-                            Reset filters
-                          </button>
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredArchitectureNodes.map((node) => {
-                        const isSelected = selectedNode?.id === node.id;
-                        return (
-                          <tr
-                            key={node.id}
-                            onClick={() => setSelectedNode(node)}
-                            className={`transition-colors cursor-pointer ${
-                              isSelected ? 'bg-slate-800/90' : 'hover:bg-slate-800/40'
-                            }`}
-                          >
-                            <td className="py-3 px-4 font-mono text-slate-100">{node.modulePath}</td>
-                            <td className="py-3 px-4 text-slate-300">{node.tier}</td>
-                            <td className="py-3 px-4 text-slate-300">{node.complexity}</td>
-                            <td className="py-3 px-4 text-emerald-400 font-medium">{node.status}</td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
+            <div className="lg:col-span-8">
+              <ModuleTopologyGraph
+                architectureNodes={filteredArchitectureNodes}
+                mcpContracts={report.mcpContracts}
+                pipelineSteps={DEFAULT_PIPELINE_STEPS}
+                selectedNodeId={selectedGraphItem?.id || selectedNode?.modulePath}
+                onSelectGraphNode={(gNode) => {
+                  setSelectedGraphItem(gNode);
+                  if (gNode.rawModule) {
+                    setSelectedNode(gNode.rawModule);
+                  }
+                }}
+              />
             </div>
 
-            {/* Selected Module Inspector (4 columns) */}
+            {/* Selected Node / Module Inspector (4 columns) */}
             <div className="lg:col-span-4 bg-[#111827] border border-slate-800 rounded-xl p-5 space-y-4">
-              {selectedNode ? (
+              {selectedGraphItem && !selectedGraphItem.rawModule ? (
+                <>
+                  <div className="space-y-1 border-b border-slate-800 pb-3">
+                    <div className="text-xs text-slate-400">
+                      {selectedGraphItem.subLabel} · Status: {selectedGraphItem.status}
+                    </div>
+                    <h3 className="text-sm font-mono font-bold text-white break-all">
+                      {selectedGraphItem.label}
+                    </h3>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="text-xs font-medium text-slate-400">Topology Role &amp; Contract</div>
+                    <p className="text-xs text-slate-200 leading-relaxed">{selectedGraphItem.details}</p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="text-xs font-medium text-slate-400">Verification Command / Gate</div>
+                    <div className="bg-[#0b0f17] border border-slate-800 rounded-lg p-2.5 text-xs font-mono text-emerald-300/95 break-all">
+                      $ {selectedGraphItem.invariantOrCmd}
+                    </div>
+                  </div>
+                </>
+              ) : selectedNode ? (
                 <>
                   <div className="space-y-1 border-b border-slate-800 pb-3">
                     <div className="text-xs text-slate-400">
@@ -1110,9 +1098,77 @@ export default function App() {
                 </>
               ) : (
                 <div className="text-xs text-slate-400 py-6 text-center">
-                  Select any module row to inspect its reverse-engineered invariants and dependencies.
+                  Select any node in the topology graph or table row to inspect its invariants and dependencies.
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Module Data Grid (Full Width) */}
+          <div className="bg-[#111827] border border-slate-800 rounded-xl overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-200">
+                Reverse-Engineered Module Inventory
+              </span>
+              <span className="text-xs text-slate-400 font-mono tabular-nums">
+                {filteredArchitectureNodes.length} modules indexed
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-800 text-xs font-semibold text-slate-400 bg-[#0b0f17]/50">
+                    <th className="py-3 px-4">Module Path</th>
+                    <th className="py-3 px-4">Swarm Tier</th>
+                    <th className="py-3 px-4">Complexity</th>
+                    <th className="py-3 px-4">Direct Dependencies</th>
+                    <th className="py-3 px-4">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/80 text-xs">
+                  {filteredArchitectureNodes.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-8 text-center text-slate-400">
+                        No architecture modules match your current filter.{' '}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setArchSearch('');
+                            setArchTierFilter('All');
+                          }}
+                          className="text-emerald-400 underline ml-1 cursor-pointer"
+                        >
+                          Reset filters
+                        </button>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredArchitectureNodes.map((node) => {
+                      const isSelected = selectedNode?.id === node.id;
+                      return (
+                        <tr
+                          key={node.id}
+                          onClick={() => {
+                            setSelectedNode(node);
+                            setSelectedGraphItem(null);
+                          }}
+                          className={`transition-colors cursor-pointer ${
+                            isSelected ? 'bg-slate-800/90' : 'hover:bg-slate-800/40'
+                          }`}
+                        >
+                          <td className="py-3 px-4 font-mono text-slate-100">{node.modulePath}</td>
+                          <td className="py-3 px-4 text-slate-300">{node.tier}</td>
+                          <td className="py-3 px-4 text-slate-300">{node.complexity}</td>
+                          <td className="py-3 px-4 font-mono text-slate-400">
+                            {node.dependencies.join(' · ') || 'None'}
+                          </td>
+                          <td className="py-3 px-4 text-emerald-400 font-medium">{node.status}</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
 
