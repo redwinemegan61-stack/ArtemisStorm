@@ -11,7 +11,7 @@ export interface ArchitectureNode {
 
 export interface McpToolContract {
   name: string;
-  origin: 'google/artemis' | 'morluto/rea' | 'Unified Bridge';
+  origin: 'google/artemis' | 'morluto/rea' | 'Unified Bridge' | 'Netflix OSS' | 'TypeSafe Jev';
   signature: string;
   purpose: string;
   ciVerificationCmd: string;
@@ -559,6 +559,859 @@ export const INITIAL_ARTEMIS_REA_REPORT: ReverseEngineeringReport = {
   unifiedCiYaml: UNIFIED_REA_ARTEMIS_CI_YAML,
   posixPatchCode: POSIX_COMPAT_PATCH,
   generatedTestSuite: GENERATED_SWARM_TEST_SUITE
+};
+
+// ---------------------------------------------------------------------------
+// Netflix OSS & Client Architecture REA Report & Pipeline Presets
+// ---------------------------------------------------------------------------
+
+export const NETFLIX_ORIGINAL_CI_YAML = `name: Netflix Conductor Build & Test Baseline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      # PROBLEM 1: Gradle daemon memory exhaustion (OOM on 7GB runners)
+      - name: Build with Gradle
+        run: ./gradlew build
+      # PROBLEM 2: Integration tests require live external Redis & Eureka instances
+      - name: Run Integration Tests
+        run: ./gradlew test --tests "*IntegrationTest*"
+`;
+
+export const NETFLIX_UNIFIED_CI_YAML = `name: Netflix REA Swarm & Conductor CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, "release/**" ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+  actions: read
+
+env:
+  JAVA_VERSION: "17"
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx2048m -Dorg.gradle.parallel=true"
+  NETFLIX_MOCK_EUREKA: "1"
+  NETFLIX_MOCK_REDIS: "1"
+
+jobs:
+  static-and-invariant-gate:
+    name: Code Standards & Architecture Invariants Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK \${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: \${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Verify Spotless & Architectural Invariants
+        run: |
+          ./gradlew spotlessCheck --stacktrace
+
+      - name: Audit MSL Socket & POSIX Non-Blocking I/O
+        run: |
+          python3 -c "
+          import socket, fcntl, os
+          s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+          flags = fcntl.fcntl(s, fcntl.F_GETFL)
+          fcntl.fcntl(s, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+          print('POSIX non-blocking socket I/O verified for Netflix MSL mock transport.')
+          "
+
+  netflix-swarm-test-matrix:
+    name: Conductor, Falcor & MSL Swarm Matrix Verification
+    needs: static-and-invariant-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - name: "conductor-workflow-engine"
+            task: "conductor-server:test"
+          - name: "falcor-json-graph-router"
+            task: "falcor-router:test"
+          - name: "msl-session-handshake"
+            task: "msl-core:test"
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK \${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: \${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Start Ephemeral Mock Redis & Eureka Registry
+        run: |
+          python3 -m http.server 8761 --directory tests/mocks/eureka &
+          python3 tests/mocks/mock_redis_server.py --port 6379 &
+          sleep 2
+
+      - name: Run \${{ matrix.suite.name }}
+        run: |
+          ./gradlew \${{ matrix.suite.task }} --no-daemon
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: netflix-test-report-\${{ matrix.suite.name }}
+          path: "**/build/test-results/**/*.xml"
+
+  deploy-netflix-oss-release:
+    name: Automated Distribution & Swarm Webhook Deploy
+    needs: netflix-swarm-test-matrix
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK \${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: \${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+      - name: Build Distribution JAR
+        run: ./gradlew assemble --no-daemon
+      - name: Publish Artifact to Swarm Cluster
+        run: echo "Netflix OSS Conductor release successfully published to Swarm on commit \${{ github.sha }}."
+`;
+
+export const NETFLIX_POSIX_PATCH = `"""
+netflix_posix_compat.py
+POSIX Socket Non-Blocking Shim & Conductor Runner Normalization for Linux CI
+"""
+import socket
+import fcntl
+import os
+import sys
+
+def configure_non_blocking_msl_socket(sock: socket.socket) -> socket.socket:
+    """Configures socket flags for non-blocking I/O across POSIX Linux environments."""
+    if hasattr(fcntl, 'F_GETFL') and hasattr(fcntl, 'F_SETFL'):
+        flags = fcntl.fcntl(sock, fcntl.F_GETFL)
+        fcntl.fcntl(sock, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    return sock
+
+def get_gradle_safe_jvm_args() -> list[str]:
+    """Returns memory-capped Gradle arguments preventing OOM crashes in 7GB CI runners."""
+    return [
+        "-Dorg.gradle.daemon=false",
+        "-Dorg.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m",
+        "-Dorg.gradle.parallel=true",
+    ]
+`;
+
+export const NETFLIX_GENERATED_TEST_SUITE = `"""
+test_netflix_rea_swarm.py
+Automated regression test suite verifying Netflix Conductor, Falcor & MSL contracts.
+"""
+import pytest
+from unittest.mock import MagicMock
+
+def test_conductor_workflow_dag_invariants():
+    workflow_definition = {
+        "name": "encode_and_catalog_media_pipeline",
+        "version": 1,
+        "tasks": [
+            {"name": "fetch_source_metadata", "taskReferenceName": "t1", "type": "SIMPLE"},
+            {"name": "generate_adaptive_bitrate_manifest", "taskReferenceName": "t2", "type": "SIMPLE"},
+            {"name": "publish_to_cdn_inventory", "taskReferenceName": "t3", "type": "SIMPLE"},
+        ]
+    }
+    assert len(workflow_definition["tasks"]) == 3
+    task_refs = [t["taskReferenceName"] for t in workflow_definition["tasks"]]
+    assert len(task_refs) == len(set(task_refs)), "Task reference names must be unique"
+
+def test_falcor_json_graph_batch_query():
+    path_sets = [
+        ["genres", 12, "titles", [0, 1, 2], ["id", "title", "releaseYear"]]
+    ]
+    assert len(path_sets[0][3]) == 3
+    assert "title" in path_sets[0][4]
+
+def test_msl_transport_security_envelope():
+    # Audits Message Security Layer mutual handshake envelope without DRM payload decryption
+    msl_envelope = {
+        "sender": "netflix-client-posix-v2",
+        "recipient": "edge-zuul-service",
+        "cipher_suite": "AES_128_GCM_SHA256",
+        "compression": "GZIP",
+        "drm_payload_excluded": True,
+    }
+    assert msl_envelope["drm_payload_excluded"] is True
+    assert msl_envelope["cipher_suite"] == "AES_128_GCM_SHA256"
+`;
+
+export const NETFLIX_PIPELINE_STEPS: PipelineStep[] = [
+  {
+    id: 'step-nf-1',
+    stage: 'Bootstrap',
+    name: 'Setup Java 17, Gradle 8.5 & Node.js 20 Environment',
+    command: 'sdk install java 17.0.10-tem && ./gradlew --version',
+    durationMs: 1650,
+    logOutput: [
+      'Configured Eclipse Temurin JDK 17.0.10 on ubuntu-latest runner',
+      'Gradle 8.5 cache restored: 1,420 cached JAR artifacts (saved 4.2m build time)',
+      'Initialized Conductor microservices daemon with embedded mock Redis'
+    ]
+  },
+  {
+    id: 'step-nf-2',
+    stage: 'Static & POSIX Audit',
+    name: 'Audit Conductor Workflow Invariants & POSIX Socket Buffers',
+    command: './gradlew spotlessCheck && python scripts/audit_msl_sockets.py',
+    durationMs: 1120,
+    fixesIssue: 'Resolves socket buffer deadlock on POSIX Linux runners during MSL mock handshakes',
+    logOutput: [
+      'Spotless check passed: Java & Groovy code standards verified (0 violations)',
+      'Normalized MSL socket buffer sizes to 64KB with non-blocking POSIX fcntl',
+      'Verified Eureka client heartbeat renewal interval (30s) and timeout bounds'
+    ]
+  },
+  {
+    id: 'step-nf-3',
+    stage: 'REA Decompiler MCP',
+    name: 'REA AST Symbol Extractor on Conductor & Falcor Schemas',
+    command: 'rea-mcp extract --target netflix-conductor-client --mode ast-json',
+    durationMs: 1980,
+    logOutput: [
+      'Decompiled 36 Conductor task execution handlers into normalized AST nodes',
+      'Extracted Falcor JSON Graph router schema and virtual path batch definitions',
+      'Confirmed zero DRM/Widevine payload handling in compliance with safety guardrails'
+    ]
+  },
+  {
+    id: 'step-nf-4',
+    stage: 'Artemis Device Matrix',
+    name: 'Execute Conductor Workflow & Edge Router Mock Matrix (Push Triggered)',
+    command: './gradlew test --tests "*ConductorWorkflowTest*" -Dmock.eureka=true',
+    durationMs: 2450,
+    fixesIssue: 'Bypassed external cloud dependency by spinning up ephemeral mock registry',
+    logOutput: [
+      'Embedded Eureka registry active on 127.0.0.1:8761',
+      'Executed 28 Conductor workflow DAG tests: 28 passed, 0 failed in 2.12s',
+      'Verified Hystrix circuit-breaker trip threshold under 50% mock upstream latency'
+    ]
+  },
+  {
+    id: 'step-nf-5',
+    stage: 'Automated Deployment',
+    name: 'Package Conductor Docker Image & Verify Edge Distribution',
+    command: './gradlew dockerBuildImage && docker run --rm conductor:test --smoke',
+    durationMs: 1820,
+    logOutput: [
+      'Constructed dist/conductor-server-3.15.0.jar (42.1 MB)',
+      'Ephemeral container smoke test passed in 410ms',
+      'Triggered automated swarm webhook for Netflix OSS integration cluster'
+    ]
+  }
+];
+
+export const NETFLIX_REA_REPORT: ReverseEngineeringReport = {
+  repoFullName: 'Netflix/conductor + Netflix OSS & Client Architecture REA',
+  repoUrl: 'https://github.com/Netflix/conductor',
+  defaultBranch: 'main',
+  analyzedAt: '2026-10-28T16:55:00Z',
+  executiveSummary:
+    'Reverse-engineered Netflix distributed microservice architecture (Netflix Conductor workflow engine, Eureka service registry, Zuul edge routing, Falcor JSON Graph data caching) and client Message Security Layer (MSL) transport. NOTE: Strict safety guardrails are strictly enforced—proprietary DRM, Widevine/FairPlay/PlayReady CDM decryption, and video stream piracy are categorically restricted and excluded. Analysis is focused exclusively on open-source microservice orchestration, resilience patterns (Hystrix circuit breaking), and secure network session protocols. Synthesized a unified push CI pipeline verifying Gradle build invariants, mock Conductor task worker execution, and POSIX runner stability.',
+  computeAllocation: {
+    supervisorSharePct: 15,
+    workerSharePct: 85,
+    estimatedCostReductionPct: 78,
+    tacticalRationale:
+      'Lead Supervisor verified circuit-breaker invariants, security transport boundaries, and DRM anti-piracy exclusion filters (15% compute). The remaining 85% of Conductor DAG traversal, Falcor path-set extraction, and Gradle CI test scaffolding was delegated to Tier-2 Trust-Group specialists.'
+  },
+  ciIssuesResolved: [
+    {
+      id: 'CI-NF-01',
+      file: 'build.gradle / gradle.properties',
+      severity: 'Critical',
+      rootCause:
+        'Default Gradle daemon spawned multi-gigabyte worker threads causing out-of-memory (OOM) kills on standard 2-core / 7GB GitHub Actions runners.',
+      fixApplied:
+        'Enforced `-Dorg.gradle.daemon=false` and pinned `-Xmx2048m -XX:MaxMetaspaceSize=512m` in Gradle environment variables.'
+    },
+    {
+      id: 'CI-NF-02',
+      file: 'conductor-server/src/test/java/WorkflowIntegrationTest.java',
+      severity: 'High',
+      rootCause:
+        'Tests attempted to connect to remote live Redis queues and Eureka service registries, failing deterministically in isolated CI containers.',
+      fixApplied:
+        'Bundled ephemeral embedded mock Redis daemon and local HTTP Eureka discovery fixture in CI test bootstrap.'
+    },
+    {
+      id: 'CI-NF-03',
+      file: 'msl-core/src/transport/SocketChannel.ts',
+      severity: 'Medium',
+      rootCause:
+        'Blocking POSIX socket reads deadlocked the MSL handshake test runner during simulated network latency spikes.',
+      fixApplied:
+        'Applied non-blocking POSIX fcntl normalization shim and configured 1500ms socket timeouts.'
+    }
+  ],
+  architectureNodes: [
+    {
+      id: 'node-nf-1',
+      modulePath: 'conductor-server/orchestrator.java',
+      role: 'Netflix Conductor microservices workflow orchestration engine coordinating complex distributed DAGs.',
+      tier: 'Supervisor',
+      dependencies: ['conductor-redis/queue_manager.java', 'conductor-common/metadata_task.java'],
+      complexity: 'High',
+      invariants: 'Workflow task dependencies must form an acyclic graph; all task retries must be idempotent.',
+      status: 'Verified'
+    },
+    {
+      id: 'node-nf-2',
+      modulePath: 'zuul-core/edge_router.groovy',
+      role: 'Zuul dynamic edge gateway handling traffic routing, token validation, and rate limiting.',
+      tier: 'MCP Core',
+      dependencies: ['eureka-client/discovery.java', 'hystrix-resilience/circuit_breaker.java'],
+      complexity: 'High',
+      invariants: 'Inbound requests must validate JWT context before dispatching to internal microservice tier.',
+      status: 'Verified'
+    },
+    {
+      id: 'node-nf-3',
+      modulePath: 'eureka-client/discovery.java',
+      role: 'Service discovery client registering instance IP/port and transmitting ephemeral heartbeats.',
+      tier: 'Decompiler Bridge',
+      dependencies: ['conductor-server/orchestrator.java'],
+      complexity: 'Medium',
+      invariants: 'Heartbeat renew interval must not exceed 30 seconds; lease expiration default is 90 seconds.',
+      status: 'Verified'
+    },
+    {
+      id: 'node-nf-4',
+      modulePath: 'falcor-model/json_graph.js',
+      role: 'Falcor client data cache and virtual node resolver converting nested paths into batched requests.',
+      tier: 'MCP Core',
+      dependencies: ['zuul-core/edge_router.groovy'],
+      complexity: 'Medium',
+      invariants: 'Path-sets must collapse duplicate sub-paths into single network roundtrip payload.',
+      status: 'Verified'
+    },
+    {
+      id: 'node-nf-5',
+      modulePath: 'msl-transport/handshake.ts',
+      role: 'Message Security Layer protocol handling authenticated entity handshake (excluding proprietary DRM payloads).',
+      tier: 'Decompiler Bridge',
+      dependencies: ['zuul-core/edge_router.groovy'],
+      complexity: 'High',
+      invariants: 'Strict safety rule: Zero decryption or extraction of DRM keys (Widevine/FairPlay/HDCP); protocol envelope inspection only.',
+      status: 'Patched for CI'
+    },
+    {
+      id: 'node-nf-6',
+      modulePath: 'hystrix-resilience/circuit_breaker.java',
+      role: 'Fault tolerance and latency throttle opening fallback circuits during upstream degradation.',
+      tier: 'CI/CD Gate',
+      dependencies: ['zuul-core/edge_router.groovy', 'conductor-server/orchestrator.java'],
+      complexity: 'Medium',
+      invariants: 'Trip circuit breaker open if request failure rate exceeds 50% across a rolling 10s evaluation window.',
+      status: 'Verified'
+    }
+  ],
+  mcpContracts: [
+    {
+      name: 'rea_inspect_netflix_conductor',
+      origin: 'Netflix OSS',
+      signature: '(workflow_def: dict, task_types: list[str]) -> ConductorWorkflowAst',
+      purpose: 'Analyzes Netflix Conductor workflow DAG definitions and extracts task dependencies into normalized AST representation.',
+      ciVerificationCmd: './gradlew test --tests "*ConductorWorkflowTest*"'
+    },
+    {
+      name: 'rea_parse_falcor_graph',
+      origin: 'Netflix OSS',
+      signature: '(path_sets: list[str], root_graph: dict) -> ResolvedJsonGraph',
+      purpose: 'Resolves and batches Falcor JSON Graph path-sets against virtual domain nodes for client telemetry caching.',
+      ciVerificationCmd: 'npm test -- --grep "falcor_json_graph"'
+    },
+    {
+      name: 'rea_audit_msl_handshake',
+      origin: 'Unified Bridge',
+      signature: '(header_envelope: dict, cipher_spec: str) -> HandshakeAuditResult',
+      purpose: 'Inspects Netflix MSL protocol handshake envelopes for cryptographic header integrity without DRM circumvention.',
+      ciVerificationCmd: 'python3 -m pytest tests/test_msl_security.py'
+    },
+    {
+      name: 'rea_verify_resilience_circuit',
+      origin: 'Netflix OSS',
+      signature: '(failure_rate_pct: float, timeout_ms: int) -> CircuitStatePayload',
+      purpose: 'Simulates upstream microservice latency spikes and confirms automatic fallback circuit breaker actuation.',
+      ciVerificationCmd: './gradlew test --tests "*HystrixCircuitTest*"'
+    }
+  ],
+  trustGroupPlaybook: [
+    {
+      id: 'sop-nf-1',
+      taskCategory: 'Conductor Task Schema Extraction',
+      assignedAgent: 'Conductor-Worker-01 (Tier-3)',
+      computeTier: 'Minimal (Tier-3 Worker)',
+      estimatedTokenSavings: '81% savings vs full Java AST scan',
+      instructionTemplate:
+        'Traverse Conductor task definitions in `conductor-common/metadata`. Extract task name, retry count, timeout policy, and response timeout as JSON schema without decompiling full worker code.',
+      verificationCriteria: 'Validates against Conductor TaskDef schema with 0 missing required parameters.'
+    },
+    {
+      id: 'sop-nf-2',
+      taskCategory: 'Falcor Route Batching & PathSet Verification',
+      assignedAgent: 'Falcor-Agent (Tier-2)',
+      computeTier: 'Tactical (Tier-2 Specialist)',
+      estimatedTokenSavings: '72% compute reduction via route dictionary caching',
+      instructionTemplate:
+        'Map all routes exposed by `falcor-router`. Synthesize test path-sets verifying that multidimensional key queries resolve within a single roundtrip payload.',
+      verificationCriteria: '100% of declared virtual routes have passing batched path tests.'
+    },
+    {
+      id: 'sop-nf-3',
+      taskCategory: 'MSL Handshake Safety & Guardrail Audit',
+      assignedAgent: 'Lead-Supervisor (Tier-1)',
+      computeTier: 'Supervisor Audit Only',
+      estimatedTokenSavings: 'Supervisor invoked only on transport security envelope diff',
+      instructionTemplate:
+        'Audit all MSL transport headers to guarantee zero DRM circumvention or Widevine key extraction logic exists. Enforce that only network envelope framing is analyzed.',
+      verificationCriteria: 'Strict compliance with safety guardrails; zero DRM circumvention code present.'
+    }
+  ],
+  originalCiYaml: NETFLIX_ORIGINAL_CI_YAML,
+  unifiedCiYaml: NETFLIX_UNIFIED_CI_YAML,
+  posixPatchCode: NETFLIX_POSIX_PATCH,
+  generatedTestSuite: NETFLIX_GENERATED_TEST_SUITE
+};
+
+// ---------------------------------------------------------------------------
+// JEV (TypeSafe AI / Typed Decision Agent) Report & Pipeline Presets
+// ---------------------------------------------------------------------------
+
+export const JEV_ORIGINAL_CI_YAML = `name: Jev Agent CI Baseline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -e .
+      # PROBLEM 1: Flaky browser test execution due to missing Playwright system dependencies
+      - name: Run Tests
+        run: pytest tests/
+`;
+
+export const JEV_UNIFIED_CI_YAML = `name: Unified Jev Agent & Typed Decision CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, "release/**" ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+  actions: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  UV_SYSTEM_PYTHON: "false"
+  JEV_LATENCY_BUDGET_MS: "15.0"
+  JEV_DETERMINISTIC_SEED: "42"
+
+jobs:
+  static-and-schema-gate:
+    name: Ruff Audit & Typed Decision Schema Invariants
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Astral uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Provision Python \${{ env.PYTHON_VERSION }}
+        run: uv python install \${{ env.PYTHON_VERSION }} && uv sync --dev
+
+      - name: Ruff Lint & Format Check
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Validate Typed Choice JSON-Schema Invariants
+        run: |
+          uv run python -m jev_core.schema_validator --verify-all
+
+  jev-latency-and-action-matrix:
+    name: Sub-15ms Latency Benchmarks & Browser Action Matrix
+    needs: static-and-schema-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - name: "decision-engine-latency"
+            path: "tests/bench/test_decision_latency.py"
+          - name: "context-compaction"
+            path: "tests/unit/compaction/test_pruner.py"
+          - name: "browser-use-action-router"
+            path: "tests/integration/test_action_router.py"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv python install \${{ env.PYTHON_VERSION }} && uv sync --dev
+
+      - name: Execute \${{ matrix.suite.name }}
+        run: |
+          uv run pytest \${{ matrix.suite.path }} --junitxml=reports/\${{ matrix.suite.name }}.xml
+
+      - name: Upload Test Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jev-report-\${{ matrix.suite.name }}
+          path: reports/*.xml
+
+  deploy-jev-agent-release:
+    name: Automated Jev Agent Distribution & Webhook Push
+    needs: jev-latency-and-action-matrix
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - name: Build Wheel & Distribution Artifacts
+        run: |
+          uv python install \${{ env.PYTHON_VERSION }}
+          uv sync --dev
+          uv build --wheel --sdist --out-dir dist/
+      - name: Verify Clean Sandbox Import
+        run: |
+          uv run --isolated --with dist/*.whl python -c "
+          import jev_core
+          print('Jev agent typed decision runtime verified for production deployment.')
+          "
+`;
+
+export const JEV_POSIX_PATCH = `"""
+jev_posix_compat.py
+High-Resolution POSIX Clock & Non-Blocking Async IPC Normalization for Jev Runtime
+"""
+import time
+import sys
+import os
+
+def get_high_res_time_ns() -> int:
+    """Returns monotonic time in nanoseconds for sub-15ms latency auditing."""
+    return time.monotonic_ns()
+
+def verify_decision_latency(start_ns: int, max_budget_ms: float = 15.0) -> bool:
+    """Verifies that the decision cycle completed within the SLA budget."""
+    elapsed_ms = (time.monotonic_ns() - start_ns) / 1_000_000.0
+    return elapsed_ms <= max_budget_ms
+`;
+
+export const JEV_GENERATED_TEST_SUITE = `"""
+test_jev_typed_decisions.py
+Regression suite verifying Jev discrete choice enums, latency SLA, and token compaction.
+"""
+import pytest
+import time
+
+def test_jev_typed_decision_schema():
+    # Validates that Jev returns strict typed enums rather than free-form text
+    allowed_actions = ["CLICK_ELEMENT", "INPUT_TEXT", "NAVIGATE_URL", "SCROLL_PAGE", "TASK_COMPLETE"]
+    predicted_choice = {
+        "action": "CLICK_ELEMENT",
+        "target_selector": "button#submit-checkout",
+        "logit_probability": 0.964,
+        "latency_ms": 7.8,
+    }
+    assert predicted_choice["action"] in allowed_actions
+    assert predicted_choice["latency_ms"] < 15.0
+    assert predicted_choice["logit_probability"] >= 0.50
+
+def test_context_window_token_compaction():
+    # Validates that fast context compaction retains critical action tokens while pruning fluff
+    raw_history_tokens = 4200
+    pruned_history_tokens = 512
+    reduction_pct = (raw_history_tokens - pruned_history_tokens) / raw_history_tokens * 100.0
+    assert reduction_pct >= 85.0
+`;
+
+export const JEV_PIPELINE_STEPS: PipelineStep[] = [
+  {
+    id: 'step-jev-1',
+    stage: 'Bootstrap',
+    name: 'Setup Astral uv & Python 3.12 for Jev Fast Decision Runtime',
+    command: 'uv python install 3.12 && uv sync --dev',
+    durationMs: 1350,
+    logOutput: [
+      'Resolved 44 packages via uv.lock in 28ms (pydantic-core, playwright, jev-core)',
+      'Installed Jev decision runtime bindings (sub-15ms inference harness)',
+      'Initialized isolated test environment at .venv (Python 3.12.8)'
+    ]
+  },
+  {
+    id: 'step-jev-2',
+    stage: 'Static & POSIX Audit',
+    name: 'Ruff Linter & Pydantic Typed Choice Schema Verification',
+    command: 'uv run ruff check . && uv run python -m jev_core.schema_validator',
+    durationMs: 890,
+    fixesIssue: 'Eliminates schema drift between Python Pydantic enums and Jev typed decision logits',
+    logOutput: [
+      'All 32 files formatted and passed strict typing inspection',
+      'Validated 18 discrete action schemas against JSON Schema draft-07',
+      'Verified non-blocking POSIX high-resolution nanosecond timer access'
+    ]
+  },
+  {
+    id: 'step-jev-3',
+    stage: 'REA Decompiler MCP',
+    name: 'Run REA Decompiler on Jev Action Space & Context Pruner',
+    command: 'uv run pytest tests/unit/compaction/ -q',
+    durationMs: 1620,
+    logOutput: [
+      'Extracted action-space decision DAG and discrete logit boundaries',
+      'Verified context-window token pruning algorithm (88.4% token compaction retention)',
+      '14 compaction unit tests passed in 0.94s'
+    ]
+  },
+  {
+    id: 'step-jev-4',
+    stage: 'Artemis Device Matrix',
+    name: 'Run Jev Sub-15ms Latency Benchmarks & Browser Action Suite',
+    command: 'uv run pytest tests/bench/ -k "test_decision_latency or test_action_dispatch"',
+    durationMs: 2150,
+    fixesIssue: 'Enforces strict CI latency budget (< 15ms per decision) to prevent agent lag',
+    logOutput: [
+      'Benchmark p50 latency: 8.4ms | p95 latency: 12.1ms | p99 latency: 14.8ms',
+      'Executed 24 browser action test cases with zero hallucinated decision paths',
+      'Passed all 24/24 integration tests'
+    ]
+  },
+  {
+    id: 'step-jev-5',
+    stage: 'Automated Deployment',
+    name: 'Build Wheel & Deploy Jev Agent Swarm Distribution',
+    command: 'uv build --wheel && uv run python scripts/publish_jev_agent.py',
+    durationMs: 1410,
+    logOutput: [
+      'Built wheel: dist/jev_agent_ultrafast-1.2.0-py3-none-any.whl (184 KB)',
+      'Verified clean isolated import in sandbox environment in 18ms',
+      'Dispatched deployment payload to production agent swarm cluster'
+    ]
+  }
+];
+
+export const JEV_REPO_REPORT: ReverseEngineeringReport = {
+  repoFullName: 'jev (TypeSafe AI / Typed Decision Agent & Fast Context Compaction)',
+  repoUrl: 'https://github.com/browser-use/jev-ultrafast',
+  defaultBranch: 'main',
+  analyzedAt: '2026-10-28T16:55:00Z',
+  executiveSummary:
+    'Reverse-engineered the JEV (TypeSafe AI) decision model architecture and high-performance typed action agents (such as browser-use/jev-ultrafast and context compaction utilities). Jev replaces open-ended natural language generation with rapid, typed discrete decision spaces and logit probabilities, achieving sub-15ms agent choices with up to 90% token reduction. Reverse-engineered the typed schema validator, logit probability ranker, context-window token pruning pipeline, and synthesized an automated GitHub Actions CI pipeline that verifies latency budgets (<15ms per decision) and typed invariant validation upon every git push.',
+  computeAllocation: {
+    supervisorSharePct: 12,
+    workerSharePct: 88,
+    estimatedCostReductionPct: 84,
+    tacticalRationale:
+      'Lead Supervisor verified strict typing proofs, latency bound limits, and out-of-distribution guardrails (12% compute). The remaining 88% of schema test generation, browser action space mapping, and token compaction regression tests was delegated to Tier-2 Trust-Group specialists.'
+  },
+  ciIssuesResolved: [
+    {
+      id: 'CI-JEV-01',
+      file: 'jev_agent/action_router.py',
+      severity: 'Critical',
+      rootCause:
+        'Unbounded async action-space evaluation caused intermittent timeouts on high-contention browser agent tasks.',
+      fixApplied:
+        'Injected a deterministic 15ms watchdog timer that forces fast fallback to safe default actions if inference exceeds threshold.'
+    },
+    {
+      id: 'CI-JEV-02',
+      file: 'jev_core/schema_validator.py',
+      severity: 'High',
+      rootCause:
+        'Schema drift between Python Pydantic action models and Jev discrete logit enums caused runtime serialization errors.',
+      fixApplied:
+        'Created an automated CI pre-commit schema synchronization gate that enforces bidirectional equality.'
+    },
+    {
+      id: 'CI-JEV-03',
+      file: '.github/workflows/ci.yml',
+      severity: 'Medium',
+      rootCause:
+        'Latency benchmarks were only executed manually, allowing high-latency regressions to slip into the main branch.',
+      fixApplied:
+        'Added automated sub-15ms latency benchmark regression step in push CI matrix on ubuntu-latest.'
+    }
+  ],
+  architectureNodes: [
+    {
+      id: 'node-jev-1',
+      modulePath: 'jev_core/decision_engine.py',
+      role: 'High-speed typed decision model inference runtime outputting discrete choice enums and probabilities.',
+      tier: 'MCP Core',
+      dependencies: ['jev_core/schema_validator.py'],
+      complexity: 'High',
+      invariants: 'Must emit validated typed choice with logit probability in under 15ms.',
+      status: 'Verified'
+    },
+    {
+      id: 'node-jev-2',
+      modulePath: 'jev_core/schema_validator.py',
+      role: 'Pydantic & JSON Schema boundary enforcing typed choice invariant rules.',
+      tier: 'CI/CD Gate',
+      dependencies: [],
+      complexity: 'Medium',
+      invariants: 'All runtime decisions must strictly match declared enum variants with zero out-of-spec actions.',
+      status: 'Verified'
+    },
+    {
+      id: 'node-jev-3',
+      modulePath: 'jev_agent/action_router.py',
+      role: 'Browser and device low-latency discrete action dispatcher (Playwright & ADB compatible).',
+      tier: 'Device Automation',
+      dependencies: ['jev_core/decision_engine.py'],
+      complexity: 'Medium',
+      invariants: 'Direct dispatch to browser/device driver without multi-turn LLM re-prompting.',
+      status: 'Verified'
+    },
+    {
+      id: 'node-jev-4',
+      modulePath: 'jev_compactor/context_pruner.py',
+      role: 'Dynamic context-window token scoring and compaction utility pruning low-value conversational text.',
+      tier: 'Decompiler Bridge',
+      dependencies: ['jev_core/decision_engine.py'],
+      complexity: 'High',
+      invariants: 'Retain 100% of causal tool signatures while pruning redundant observation DOM/logs.',
+      status: 'Verified'
+    },
+    {
+      id: 'node-jev-5',
+      modulePath: 'jev_swarm/supervisor_evaluator.py',
+      role: 'Supervisor safety watchdog evaluating action bounds and escalating unexpected decision branches.',
+      tier: 'Supervisor',
+      dependencies: ['jev_core/decision_engine.py', 'jev_agent/action_router.py'],
+      complexity: 'Medium',
+      invariants: 'Intercept any destructive system or credential actions before execution.',
+      status: 'Verified'
+    },
+    {
+      id: 'node-jev-6',
+      modulePath: 'jev_bench/latency_gate.py',
+      role: 'Automated CI latency gate verifying sub-15ms p99 execution SLA.',
+      tier: 'CI/CD Gate',
+      dependencies: ['jev_core/decision_engine.py'],
+      complexity: 'Low',
+      invariants: 'CI gate fails if p99 decision latency exceeds 25ms under standard runner CPU load.',
+      status: 'Verified'
+    }
+  ],
+  mcpContracts: [
+    {
+      name: 'jev_evaluate_action_space',
+      origin: 'TypeSafe Jev',
+      signature: '(candidate_actions: list[str], observation_context: str) -> TypedChoiceResult',
+      purpose: 'Evaluates dynamic candidate action candidates and returns high-confidence typed choice with logit probability in <15ms.',
+      ciVerificationCmd: 'uv run pytest tests/bench/test_decision_latency.py'
+    },
+    {
+      name: 'jev_compact_context_stream',
+      origin: 'TypeSafe Jev',
+      signature: '(raw_tokens: list[str], retention_threshold: float = 0.85) -> PrunedContextPayload',
+      purpose: 'Prunes conversation history and observation output to essential tokens, saving up to 90% context window tokens.',
+      ciVerificationCmd: 'uv run pytest tests/unit/compaction/'
+    },
+    {
+      name: 'jev_validate_typed_choice',
+      origin: 'TypeSafe Jev',
+      signature: '(choice_id: str, allowed_enums: list[str]) -> SchemaComplianceReport',
+      purpose: 'Verifies runtime agent decisions against formal JSON-Schema enums to eliminate hallucinated actions.',
+      ciVerificationCmd: 'uv run python -m jev_core.schema_validator'
+    }
+  ],
+  trustGroupPlaybook: [
+    {
+      id: 'sop-jev-1',
+      taskCategory: 'Typed Action Schema Enum Extraction',
+      assignedAgent: 'Jev-Schema-Worker (Tier-3)',
+      computeTier: 'Minimal (Tier-3 Worker)',
+      estimatedTokenSavings: '89% token savings via JSON Schema AST',
+      instructionTemplate:
+        'Extract action enum declarations from `jev_agent/actions`. Verify schema compatibility with Pydantic core without running full generative LLM calls.',
+      verificationCriteria: 'Zero schema diff; enum variants fully match OpenAPI/JSON-Schema specification.'
+    },
+    {
+      id: 'sop-jev-2',
+      taskCategory: 'Action Latency Benchmark Verification',
+      assignedAgent: 'Latency-Auditor-Agent (Tier-2)',
+      computeTier: 'Tactical (Tier-2 Specialist)',
+      estimatedTokenSavings: '76% compute reduction via automated benchmark script',
+      instructionTemplate:
+        'Execute 100 iterations of candidate action scoring on synthetic browser state. Assert that p50 < 10ms and p99 < 20ms.',
+      verificationCriteria: 'Benchmark report generated with all latency assertions passing.'
+    },
+    {
+      id: 'sop-jev-3',
+      taskCategory: 'Context Compaction Token Fidelity Audit',
+      assignedAgent: 'Lead-Supervisor (Tier-1)',
+      computeTier: 'Supervisor Audit Only',
+      estimatedTokenSavings: 'Supervisor invoked only on token compaction ratio report',
+      instructionTemplate:
+        'Verify that context pruner retains key state variables and causal tool outputs while stripping redundant DOM elements.',
+      verificationCriteria: '>= 80% token reduction achieved with 100% causal graph retention.'
+    }
+  ],
+  originalCiYaml: JEV_ORIGINAL_CI_YAML,
+  unifiedCiYaml: JEV_UNIFIED_CI_YAML,
+  posixPatchCode: JEV_POSIX_PATCH,
+  generatedTestSuite: JEV_GENERATED_TEST_SUITE
 };
 
 // ---------------------------------------------------------------------------

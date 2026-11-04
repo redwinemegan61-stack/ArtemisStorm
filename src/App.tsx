@@ -9,6 +9,7 @@ import {
   GitBranch,
   Terminal,
   ShieldCheck,
+  ShieldAlert,
   Cpu,
   FileCode2,
   Search,
@@ -26,10 +27,19 @@ import {
   FileText,
   HeartPulse,
   TrendingUp,
+  Zap,
+  Plus,
+  ExternalLink,
+  Lock,
+  X,
 } from 'lucide-react';
 import {
   INITIAL_ARTEMIS_REA_REPORT,
   DEFAULT_PIPELINE_STEPS,
+  NETFLIX_REA_REPORT,
+  NETFLIX_PIPELINE_STEPS,
+  JEV_REPO_REPORT,
+  JEV_PIPELINE_STEPS,
   INITIAL_HISTORICAL_CI_RUNS,
   INITIAL_FLAKY_TEST_RECORDS,
   ReverseEngineeringReport,
@@ -37,6 +47,7 @@ import {
   TrustGroupSop,
   HistoricalCiExecution,
   FlakyTestRecord,
+  PipelineStep,
 } from './data/presets';
 import ModuleTopologyGraph, { TopologyGraphNode } from './components/ModuleTopologyGraph';
 import PipelineHealthChart from './components/PipelineHealthChart';
@@ -44,6 +55,7 @@ import QuantWorkflowStudio from './components/QuantWorkflowStudio';
 
 type ArtifactTab = 'unified-ci' | 'posix-patch' | 'pytest-suite' | 'original-ci';
 type TierFilter = 'All' | 'Supervisor' | 'MCP Core' | 'Decompiler Bridge' | 'Device Automation' | 'CI/CD Gate';
+type TargetPreset = 'artemis' | 'netflix' | 'jev' | 'custom';
 
 export default function App() {
   const [report, setReport] = useState<ReverseEngineeringReport>(INITIAL_ARTEMIS_REA_REPORT);
@@ -71,9 +83,19 @@ export default function App() {
     'tests/unit/mcp/test_device_utils.py',
   ]);
 
+  // Active repository preset & custom repo connection states
+  const [activePreset, setActivePreset] = useState<TargetPreset>('artemis');
+  const [pipelineSteps, setPipelineSteps] = useState<PipelineStep[]>(DEFAULT_PIPELINE_STEPS);
+  const [isCustomRepoModalOpen, setIsCustomRepoModalOpen] = useState<boolean>(false);
+  const [customRepoUrl, setCustomRepoUrl] = useState<string>('https://github.com/jev');
+  const [customRepoBranch, setCustomRepoBranch] = useState<string>('main');
+  const [customRepoArchitectureType, setCustomRepoArchitectureType] = useState<'jev' | 'artemis' | 'netflix'>('jev');
+  const [customRepoPat, setCustomRepoPat] = useState<string>('');
+  const [customRepoNotes, setCustomRepoNotes] = useState<string>('My JEV discrete typed-decision action agent repository');
+
   // CI Pipeline Simulator states
   const [isRunningCi, setIsRunningCi] = useState<boolean>(false);
-  const [completedSteps, setCompletedSteps] = useState<string[]>(
+  const [completedSteps, setCompletedSteps] = useState<string[]>(() =>
     DEFAULT_PIPELINE_STEPS.map((s) => s.id)
   );
   const [activeStepId, setActiveStepId] = useState<string>('step-4');
@@ -428,17 +450,114 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
     }
   };
 
+  const handleSelectPreset = (presetKey: TargetPreset, customUrl?: string) => {
+    setActivePreset(presetKey);
+    setErrorMessage(null);
+    if (presetKey === 'artemis') {
+      setReport(INITIAL_ARTEMIS_REA_REPORT);
+      setPipelineSteps(DEFAULT_PIPELINE_STEPS);
+      setCompletedSteps(DEFAULT_PIPELINE_STEPS.map((s) => s.id));
+      setActiveStepId(DEFAULT_PIPELINE_STEPS[3]?.id || 'step-4');
+      setRepoInput('https://github.com/google/artemis/blob/main/.github%2Fworkflows%2Fci.yml');
+      setTacticalObjective(
+        'Ensure CI runs on every code commit, fix Linux subprocess flags, integrate REA decompiler with Artemis MCP, and delegate routine tasks to Trust-Group workers.'
+      );
+      setSelectedNode(INITIAL_ARTEMIS_REA_REPORT.architectureNodes[1]);
+      setDiscoveredFiles([
+        '.github/workflows/ci.yml',
+        'pyproject.toml',
+        'uv.lock',
+        'mcp_server/server.py',
+        'mcp_server/utils/device_utils.py',
+        'mcp_server/tools/adb_tools.py',
+        'tests/unit/mcp/test_device_utils.py',
+      ]);
+      setStatusMessage('Switched to Google Artemis + REA target profile.');
+    } else if (presetKey === 'netflix') {
+      setReport(NETFLIX_REA_REPORT);
+      setPipelineSteps(NETFLIX_PIPELINE_STEPS);
+      setCompletedSteps(NETFLIX_PIPELINE_STEPS.map((s) => s.id));
+      setActiveStepId(NETFLIX_PIPELINE_STEPS[2]?.id || 'step-nf-3');
+      setRepoInput('https://github.com/Netflix/conductor');
+      setTacticalObjective(
+        'Reverse engineer Netflix Conductor microservice orchestrator, Zuul edge routing, and Falcor JSON Graph caching into verified MCP contracts while strictly enforcing DRM exclusion.'
+      );
+      setSelectedNode(NETFLIX_REA_REPORT.architectureNodes[0]);
+      setDiscoveredFiles([
+        '.github/workflows/ci.yml',
+        'build.gradle',
+        'conductor-server/orchestrator.java',
+        'zuul-core/edge_router.groovy',
+        'eureka-client/discovery.java',
+        'falcor-model/json_graph.js',
+        'msl-transport/handshake.ts',
+        'hystrix-resilience/circuit_breaker.java',
+        'tests/unit/conductor/test_conductor_workflow.py',
+      ]);
+      setStatusMessage('Switched to Netflix OSS & Client Architecture REA target profile (DRM Exclusion Guardrail Active).');
+    } else if (presetKey === 'jev') {
+      const targetUrl = customUrl || (repoInput.toLowerCase().includes('jev') ? repoInput : 'https://github.com/browser-use/jev-ultrafast');
+      const targetReport: ReverseEngineeringReport = {
+        ...JEV_REPO_REPORT,
+        repoUrl: targetUrl,
+        repoFullName: targetUrl.includes('github.com/') ? targetUrl.split('github.com/')[1] : 'jev (TypeSafe AI Agent)',
+      };
+      setReport(targetReport);
+      setPipelineSteps(JEV_PIPELINE_STEPS);
+      setCompletedSteps(JEV_PIPELINE_STEPS.map((s) => s.id));
+      setActiveStepId(JEV_PIPELINE_STEPS[2]?.id || 'step-jev-3');
+      setRepoInput(targetUrl);
+      setTacticalObjective(
+        'Reverse-engineer Jev typed decision model & browser action space, enforce sub-15ms latency budgets, and prune token context window by 88%.'
+      );
+      setSelectedNode(JEV_REPO_REPORT.architectureNodes[0]);
+      setDiscoveredFiles([
+        '.github/workflows/ci.yml',
+        'pyproject.toml',
+        'uv.lock',
+        'jev_core/decision_engine.py',
+        'jev_core/schema_validator.py',
+        'jev_agent/action_router.py',
+        'jev_compactor/context_pruner.py',
+        'jev_swarm/supervisor_evaluator.py',
+        'jev_bench/latency_gate.py',
+        'tests/bench/test_decision_latency.py',
+        'tests/unit/compaction/test_pruner.py',
+      ]);
+      setStatusMessage('Switched to JEV (TypeSafe AI / Typed Decision Agent & Fast Context Compaction) target profile.');
+    }
+  };
+
+  const handleConnectCustomRepo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customRepoUrl.trim()) return;
+    setIsCustomRepoModalOpen(false);
+    setRepoInput(customRepoUrl.trim());
+    setStatusMessage(`Connecting to repository ${customRepoUrl.trim()} and synchronizing architecture...`);
+
+    const lower = customRepoUrl.toLowerCase();
+    if (customRepoArchitectureType === 'jev' || lower.includes('jev')) {
+      handleSelectPreset('jev', customRepoUrl.trim());
+    } else if (customRepoArchitectureType === 'netflix' || lower.includes('netflix') || lower.includes('conductor')) {
+      handleSelectPreset('netflix');
+    } else {
+      handleSelectPreset('artemis');
+    }
+
+    await handleInspectGitHub(customRepoUrl.trim());
+  };
+
   const handleSimulateCiPipeline = () => {
-    if (isRunningCi) return;
+    if (isRunningCi || !pipelineSteps.length) return;
     setIsRunningCi(true);
     setCompletedSteps([]);
-    setActiveStepId(DEFAULT_PIPELINE_STEPS[0].id);
+    setActiveStepId(pipelineSteps[0].id);
 
-    DEFAULT_PIPELINE_STEPS.forEach((step, idx) => {
+    pipelineSteps.forEach((step, idx) => {
       setTimeout(() => {
         setActiveStepId(step.id);
         setCompletedSteps((prev) => [...prev, step.id]);
-        if (idx === DEFAULT_PIPELINE_STEPS.length - 1) {
+        if (idx === pipelineSteps.length - 1) {
           setIsRunningCi(false);
           handleRecordSimulatedRun('passed');
         }
@@ -763,13 +882,13 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
   };
 
   const activePipelineStep = useMemo(
-    () => DEFAULT_PIPELINE_STEPS.find((s) => s.id === activeStepId) || DEFAULT_PIPELINE_STEPS[0],
-    [activeStepId]
+    () => pipelineSteps.find((s) => s.id === activeStepId) || pipelineSteps[0] || DEFAULT_PIPELINE_STEPS[0],
+    [activeStepId, pipelineSteps]
   );
 
   const totalPipelineDurationMs = useMemo(
-    () => DEFAULT_PIPELINE_STEPS.reduce((acc, item) => acc + item.durationMs, 0),
-    []
+    () => pipelineSteps.reduce((acc, item) => acc + item.durationMs, 0),
+    [pipelineSteps]
   );
 
   return (
@@ -852,8 +971,264 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
       </header>
 
       <main id="top" className="flex-1 max-w-[1360px] w-full mx-auto px-6 py-8 space-y-12">
+        {/* Custom Repository Connection Modal */}
+        {isCustomRepoModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-[#111827] border border-slate-700 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-6 relative animate-in fade-in zoom-in-95 duration-150">
+              <button
+                type="button"
+                onClick={() => setIsCustomRepoModalOpen(false)}
+                className="absolute top-5 right-5 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                aria-label="Close modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="space-y-1.5 pr-8">
+                <div className="flex items-center gap-2">
+                  <span className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    <FolderGit2 className="w-4 h-4" />
+                  </span>
+                  <h3 className="text-lg font-bold text-white font-display">Add &amp; Connect Your Repository</h3>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Connect your personal GitHub repository (such as your JEV decision agent, private fork, or custom project) to the Artemis &amp; REA Swarm.
+                </p>
+              </div>
+
+              <form onSubmit={handleConnectCustomRepo} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label htmlFor="custom-repo-url" className="block text-xs font-medium text-slate-200">
+                    GitHub Repository URL or <code className="font-mono text-emerald-400">owner/repo</code>
+                  </label>
+                  <input
+                    id="custom-repo-url"
+                    type="text"
+                    value={customRepoUrl}
+                    onChange={(e) => setCustomRepoUrl(e.target.value)}
+                    placeholder="https://github.com/jev/my-agent or my-username/jev"
+                    required
+                    className="w-full px-3.5 py-2 text-sm font-mono bg-[#0b0f17] border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-400"
+                  />
+                  <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px] text-slate-400">
+                    <span>Quick Autofill:</span>
+                    <button
+                      type="button"
+                      onClick={() => setCustomRepoUrl('https://github.com/jev')}
+                      className="text-emerald-400 hover:underline cursor-pointer"
+                    >
+                      github.com/jev
+                    </button>
+                    <span>·</span>
+                    <button
+                      type="button"
+                      onClick={() => setCustomRepoUrl('https://github.com/browser-use/jev-ultrafast')}
+                      className="text-emerald-400 hover:underline cursor-pointer"
+                    >
+                      browser-use/jev-ultrafast
+                    </button>
+                    <span>·</span>
+                    <button
+                      type="button"
+                      onClick={() => setCustomRepoUrl('https://github.com/Netflix/conductor')}
+                      className="text-emerald-400 hover:underline cursor-pointer"
+                    >
+                      Netflix/conductor
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label htmlFor="custom-repo-branch" className="block text-xs font-medium text-slate-200">
+                      Default Branch
+                    </label>
+                    <input
+                      id="custom-repo-branch"
+                      type="text"
+                      value={customRepoBranch}
+                      onChange={(e) => setCustomRepoBranch(e.target.value)}
+                      placeholder="main"
+                      className="w-full px-3.5 py-2 text-sm font-mono bg-[#0b0f17] border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-400"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label htmlFor="custom-arch-type" className="block text-xs font-medium text-slate-200">
+                      Architecture Engine Seed
+                    </label>
+                    <select
+                      id="custom-arch-type"
+                      value={customRepoArchitectureType}
+                      onChange={(e) => setCustomRepoArchitectureType(e.target.value as any)}
+                      className="w-full px-3.5 py-2 text-xs bg-[#0b0f17] border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-400 cursor-pointer"
+                    >
+                      <option value="jev">JEV (Typed Decision Model &amp; Compaction)</option>
+                      <option value="artemis">Artemis + REA (ADB &amp; System Automation)</option>
+                      <option value="netflix">Netflix OSS (Workflow &amp; Edge Resilience)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="custom-repo-pat" className="block text-xs font-medium text-slate-200 flex items-center justify-between">
+                    <span>GitHub Personal Access Token (PAT)</span>
+                    <span className="text-[11px] text-slate-400">Optional for public repos</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="custom-repo-pat"
+                      type="password"
+                      value={customRepoPat}
+                      onChange={(e) => setCustomRepoPat(e.target.value)}
+                      placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                      className="w-full px-3.5 py-2 text-sm font-mono bg-[#0b0f17] border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-400"
+                    />
+                    <Lock className="w-4 h-4 text-slate-500 absolute right-3 top-2.5 pointer-events-none" />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="custom-repo-notes" className="block text-xs font-medium text-slate-200">
+                    Repository Directive / Context
+                  </label>
+                  <input
+                    id="custom-repo-notes"
+                    type="text"
+                    value={customRepoNotes}
+                    onChange={(e) => setCustomRepoNotes(e.target.value)}
+                    placeholder="Describe specific modules or tasks for the swarm"
+                    className="w-full px-3.5 py-2 text-xs bg-[#0b0f17] border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-400"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setIsCustomRepoModalOpen(false)}
+                    className="px-4 py-2 text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <FolderGit2 className="w-3.5 h-3.5" />
+                    <span>Connect &amp; Launch Swarm</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
         {/* Target Repository & Tactical Swarm Control Panel */}
         <section className="bg-[#111827] border border-slate-800 rounded-xl p-6 space-y-6">
+          {/* Architecture Target Profile Selector Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-800">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider mr-1">
+                Architecture Target:
+              </span>
+              <button
+                type="button"
+                onClick={() => handleSelectPreset('artemis')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all flex items-center gap-1.5 cursor-pointer ${
+                  activePreset === 'artemis'
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/60 shadow-sm shadow-emerald-950'
+                    : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:bg-slate-800'
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                <span>Google Artemis + REA</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectPreset('netflix')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all flex items-center gap-1.5 cursor-pointer ${
+                  activePreset === 'netflix'
+                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/60 shadow-sm shadow-rose-950'
+                    : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:bg-slate-800'
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full bg-rose-400"></span>
+                <span>Netflix OSS &amp; Client REA</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectPreset('jev')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all flex items-center gap-1.5 cursor-pointer ${
+                  activePreset === 'jev'
+                    ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/60 shadow-sm shadow-cyan-950'
+                    : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:bg-slate-800'
+                }`}
+              >
+                <Zap className="w-3.5 h-3.5 text-cyan-400" />
+                <span>JEV Typed Decision Agent</span>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsCustomRepoModalOpen(true)}
+                className="px-3 py-1.5 text-xs font-semibold text-emerald-400 bg-emerald-950/50 hover:bg-emerald-900/60 border border-emerald-500/40 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add My Repository</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Safety Guardrail Alert for Netflix */}
+          {(activePreset === 'netflix' || repoInput.toLowerCase().includes('netflix')) && (
+            <div className="p-4 bg-amber-950/40 border border-amber-600/50 rounded-xl flex items-start gap-3.5 text-xs">
+              <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <div className="font-semibold text-amber-300 flex items-center gap-2">
+                  <span>Safety Guardrail Enforced: REA Netflix Architecture Policy</span>
+                  <span className="px-1.5 py-0.5 text-[10px] uppercase font-mono rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    Restricted
+                  </span>
+                </div>
+                <p className="text-amber-200/90 leading-relaxed">
+                  Strict adherence to safety and anti-piracy policies is active: reverse engineering of DRM systems (Widevine, FairPlay, PlayReady CDM keys) and proprietary video stream decryption is categorically excluded and prohibited.
+                  The REA Swarm focuses exclusively on open-source Netflix microservices (<code className="font-mono text-amber-200">Netflix/conductor</code>, Eureka discovery, Zuul routing), Falcor JSON Graph protocols, and Message Security Layer (MSL) transport framing.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* JEV High-Speed Decision Engine Banner */}
+          {(activePreset === 'jev' || repoInput.toLowerCase().includes('jev')) && (
+            <div className="p-4 bg-cyan-950/30 border border-cyan-500/40 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs">
+              <div className="flex items-start gap-3">
+                <Zap className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="font-semibold text-cyan-300 flex items-center gap-2">
+                    <span>JEV: TypeSafe AI Typed Decision Model &amp; Token Compaction Engine</span>
+                    <span className="px-1.5 py-0.5 text-[10px] uppercase font-mono rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                      Sub-15ms Latency
+                    </span>
+                  </div>
+                  <p className="text-cyan-200/80 leading-relaxed">
+                    Replaces open-ended generative loops with rapid discrete typed choice logit evaluations and 88% context window compaction.
+                    To connect your personal Jev repository, paste your URL or click "Connect My Repository".
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCustomRepoModalOpen(true)}
+                className="px-3.5 py-1.5 text-xs font-semibold text-slate-950 bg-cyan-400 hover:bg-cyan-300 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 cursor-pointer shadow-sm"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Connect My Repository</span>
+              </button>
+            </div>
+          )}
+
           <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
             <div className="space-y-2 max-w-3xl">
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
@@ -878,12 +1253,31 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
               <span className="text-xs text-slate-400 mr-1 whitespace-nowrap">Quick Presets:</span>
               <button
                 type="button"
-                onClick={() =>
-                  handleInspectGitHub('https://github.com/google/artemis/blob/main/.github%2Fworkflows%2Fci.yml')
-                }
+                onClick={() => handleSelectPreset('artemis')}
                 className="px-3 py-1.5 text-xs font-medium text-slate-200 bg-slate-800/80 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
                 google/artemis
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectPreset('netflix')}
+                className="px-3 py-1.5 text-xs font-medium text-rose-300 bg-rose-950/30 hover:bg-rose-950/60 border border-rose-700/50 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                Netflix/conductor
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectPreset('jev', 'https://github.com/browser-use/jev-ultrafast')}
+                className="px-3 py-1.5 text-xs font-medium text-cyan-300 bg-cyan-950/30 hover:bg-cyan-950/60 border border-cyan-700/50 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                jev-ultrafast
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectPreset('jev', 'https://github.com/jev')}
+                className="px-3 py-1.5 text-xs font-medium text-emerald-300 bg-emerald-950/30 hover:bg-emerald-950/60 border border-emerald-700/50 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                github.com/jev
               </button>
               <button
                 type="button"
@@ -891,13 +1285,6 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
                 className="px-3 py-1.5 text-xs font-medium text-slate-200 bg-slate-800/80 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
                 morluto/rea
-              </button>
-              <button
-                type="button"
-                onClick={() => handleInspectGitHub('https://github.com/astral-sh/uv')}
-                className="px-3 py-1.5 text-xs font-medium text-slate-200 bg-slate-800/80 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                astral-sh/uv
               </button>
             </div>
           </div>
@@ -1101,12 +1488,12 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
                     Push Event Execution Stages (<code className="font-mono text-xs text-emerald-400">on: [push, pull_request]</code>)
                   </h3>
                   <span className="text-xs font-mono tabular-nums text-slate-400">
-                    {completedSteps.length}/{DEFAULT_PIPELINE_STEPS.length} passed
+                    {completedSteps.length}/{pipelineSteps.length} passed
                   </span>
                 </div>
 
                 <div className="space-y-2">
-                  {DEFAULT_PIPELINE_STEPS.map((step, index) => {
+                  {pipelineSteps.map((step, index) => {
                     const isDone = completedSteps.includes(step.id);
                     const isSelected = activeStepId === step.id;
                     return (
