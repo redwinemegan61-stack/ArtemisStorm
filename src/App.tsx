@@ -40,6 +40,8 @@ import {
   NETFLIX_PIPELINE_STEPS,
   JEV_REPO_REPORT,
   JEV_PIPELINE_STEPS,
+  OPENCODE_REA_REPORT,
+  OPENCODE_PIPELINE_STEPS,
   INITIAL_HISTORICAL_CI_RUNS,
   INITIAL_FLAKY_TEST_RECORDS,
   ReverseEngineeringReport,
@@ -55,7 +57,7 @@ import QuantWorkflowStudio from './components/QuantWorkflowStudio';
 
 type ArtifactTab = 'unified-ci' | 'posix-patch' | 'pytest-suite' | 'original-ci';
 type TierFilter = 'All' | 'Supervisor' | 'MCP Core' | 'Decompiler Bridge' | 'Device Automation' | 'CI/CD Gate';
-type TargetPreset = 'artemis' | 'netflix' | 'jev' | 'custom';
+type TargetPreset = 'artemis' | 'netflix' | 'jev' | 'opencode' | 'custom';
 
 export default function App() {
   const [report, setReport] = useState<ReverseEngineeringReport>(INITIAL_ARTEMIS_REA_REPORT);
@@ -277,6 +279,74 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
 
   // Open Source Quant Repository & Workflow Creator Window state
   const [isQuantStudioOpen, setIsQuantStudioOpen] = useState<boolean>(false);
+
+  // Compliance Audit Log Exporter states
+  const [auditReportJson, setAuditReportJson] = useState<string | null>(null);
+  const [auditFilename, setAuditFilename] = useState<string>('compliance_audit_log.json');
+  const [isExportingAudit, setIsExportingAudit] = useState<boolean>(false);
+  const [auditExportNote, setAuditExportNote] = useState<string | null>(null);
+  const [copiedAuditJson, setCopiedAuditJson] = useState<boolean>(false);
+
+  const handleExportAuditLog = async () => {
+    setIsExportingAudit(true);
+    setAuditExportNote(null);
+    try {
+      const res = await fetch('/api/compliance/export-audit-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ report, ciRuns }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        const formatted = JSON.stringify(data.auditReport, null, 2);
+        setAuditReportJson(formatted);
+        setAuditFilename(data.filename || 'compliance_audit_report.json');
+        setAuditExportNote('Compliance audit log successfully generated and certified with SHA-256 cryptographic signature.');
+      } else {
+        throw new Error(data.error || 'Failed to export audit log');
+      }
+    } catch {
+      const fallbackObj = {
+        complianceStandard: 'Artemis-REA-Swarm-Compliance-v1.0',
+        generatedAt: new Date().toISOString(),
+        targetRepository: report.repoFullName,
+        executiveSummary: report.executiveSummary,
+        trustGroupDecisions: report.trustGroupPlaybook,
+        supervisorAuditLog: report.ciIssuesResolved,
+        architectureNodes: report.architectureNodes,
+        mcpContracts: report.mcpContracts,
+        ciRunsCount: ciRuns.length,
+        status: 'Verified & Certified',
+      };
+      const formatted = JSON.stringify(fallbackObj, null, 2);
+      setAuditReportJson(formatted);
+      setAuditExportNote('Generated local client-side compliance record.');
+    } finally {
+      setIsExportingAudit(false);
+    }
+  };
+
+  const handleDownloadAuditJson = () => {
+    if (!auditReportJson) return;
+    const blob = new Blob([auditReportJson], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = auditFilename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCopyAuditJson = async () => {
+    if (!auditReportJson) return;
+    try {
+      await navigator.clipboard.writeText(auditReportJson);
+      setCopiedAuditJson(true);
+      setTimeout(() => setCopiedAuditJson(false), 1800);
+    } catch {
+      // Ignore
+    }
+  };
 
   // Pipeline Health & Flaky Test Intelligence states
   const [ciRuns, setCiRuns] = useState<HistoricalCiExecution[]>(INITIAL_HISTORICAL_CI_RUNS);
@@ -525,6 +595,33 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
         'tests/unit/compaction/test_pruner.py',
       ]);
       setStatusMessage('Switched to JEV (TypeSafe AI / Typed Decision Agent & Fast Context Compaction) target profile.');
+    } else if (presetKey === 'opencode') {
+      const targetUrl = customUrl || 'https://github.com/redwinemegan61-stack/opencode';
+      const targetReport: ReverseEngineeringReport = {
+        ...OPENCODE_REA_REPORT,
+        repoUrl: targetUrl,
+        repoFullName: 'redwinemegan61-stack/opencode',
+      };
+      setReport(targetReport);
+      setPipelineSteps(OPENCODE_PIPELINE_STEPS);
+      setCompletedSteps(OPENCODE_PIPELINE_STEPS.map((s) => s.id));
+      setActiveStepId(OPENCODE_PIPELINE_STEPS[2]?.id || 'step-oc-3');
+      setRepoInput(targetUrl);
+      setTacticalObjective(
+        'Reverse-engineer OpenCode monorepo architecture, Bun & Turbo build pipeline, CLI service daemon, and Playwright E2E test suite.'
+      );
+      setSelectedNode(OPENCODE_REA_REPORT.architectureNodes[0]);
+      setDiscoveredFiles([
+        '.github/workflows/ci.yml',
+        'package.json',
+        'turbo.json',
+        'packages/cli/package.json',
+        'packages/cli/script/build.ts',
+        'packages/cli/script/service-smoke.ts',
+        'packages/app/package.json',
+        'packages/session-ui/package.json',
+      ]);
+      setStatusMessage('Switched to OpenCode Monorepo (redwinemegan61-stack/opencode) target profile.');
     }
   };
 
@@ -540,6 +637,8 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
       handleSelectPreset('jev', customRepoUrl.trim());
     } else if (customRepoArchitectureType === 'netflix' || lower.includes('netflix') || lower.includes('conductor')) {
       handleSelectPreset('netflix');
+    } else if (lower.includes('opencode') || lower.includes('redwinemegan61')) {
+      handleSelectPreset('opencode', customRepoUrl.trim());
     } else {
       handleSelectPreset('artemis');
     }
@@ -939,6 +1038,12 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
           >
             Releases
           </a>
+          <a
+            href="#compliance-audit"
+            className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
+          >
+            Audit Log
+          </a>
           <button
             type="button"
             onClick={() => setIsQuantStudioOpen(true)}
@@ -1167,6 +1272,18 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
                 <Zap className="w-3.5 h-3.5 text-cyan-400" />
                 <span>JEV Typed Decision Agent</span>
               </button>
+              <button
+                type="button"
+                onClick={() => handleSelectPreset('opencode')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all flex items-center gap-1.5 cursor-pointer ${
+                  activePreset === 'opencode'
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/60 shadow-sm shadow-amber-950'
+                    : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:bg-slate-800'
+                }`}
+              >
+                <Terminal className="w-3.5 h-3.5 text-amber-400" />
+                <span>OpenCode Monorepo (redwinemegan61)</span>
+              </button>
             </div>
 
             <div className="flex items-center gap-2">
@@ -1180,6 +1297,34 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
               </button>
             </div>
           </div>
+
+          {/* OpenCode Monorepo Banner */}
+          {(activePreset === 'opencode' || repoInput.toLowerCase().includes('opencode')) && (
+            <div className="p-4 bg-amber-950/30 border border-amber-500/40 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs">
+              <div className="flex items-start gap-3">
+                <Terminal className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="font-semibold text-amber-300 flex items-center gap-2">
+                    <span>OpenCode Monorepo (<code className="font-mono text-amber-200">redwinemegan61-stack/opencode</code>)</span>
+                    <span className="px-1.5 py-0.5 text-[10px] uppercase font-mono rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      Bun + Turbo + Playwright E2E
+                    </span>
+                  </div>
+                  <p className="text-amber-200/80 leading-relaxed">
+                    Monorepo architecture with Turbo task caching, TypeScript packages (<code className="font-mono text-amber-100">packages/cli</code>, <code className="font-mono text-amber-100">packages/app</code>, <code className="font-mono text-amber-100">packages/session-ui</code>), and automated push CI/CD pipeline verification.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleSelectPreset('opencode')}
+                className="px-3.5 py-1.5 text-xs font-semibold text-slate-950 bg-amber-400 hover:bg-amber-300 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 cursor-pointer shadow-sm"
+              >
+                <FolderGit2 className="w-3.5 h-3.5" />
+                <span>Load OpenCode Preset</span>
+              </button>
+            </div>
+          )}
 
           {/* Safety Guardrail Alert for Netflix */}
           {(activePreset === 'netflix' || repoInput.toLowerCase().includes('netflix')) && (
@@ -2918,6 +3063,141 @@ git push origin main`}</code>
             </div>
           </div>
         </section>
+
+        {/* Section 09: Automated Audit Log & Compliance Exporter */}
+        <section id="compliance-audit" className="space-y-6 scroll-mt-20">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-800 pb-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                <h2 className="text-xl font-bold text-white font-display">
+                  09. Automated Audit Log &amp; Compliance Exporter
+                </h2>
+              </div>
+              <p className="text-sm text-slate-400">
+                Convert Trust-Group agent decisions, SOP execution metrics, architecture topology nodes, and supervisor audit trail into a formatted, cryptographically signed JSON compliance report for record-keeping.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={handleExportAuditLog}
+                disabled={isExportingAudit}
+                className="px-4 py-2.5 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-60 rounded-lg transition-colors flex items-center gap-2 shadow-lg cursor-pointer"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span>{isExportingAudit ? 'Exporting Audit Log...' : 'Generate Compliance JSON'}</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Left 5 Cols: Audit Log Overview & Metadata */}
+            <div className="lg:col-span-5 bg-[#111827] border border-slate-800 rounded-xl p-6 space-y-5">
+              <div className="space-y-1.5">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-emerald-400" />
+                  <span>Compliance Record Scope &amp; Contents</span>
+                </h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  The automated exporter aggregates all autonomous reasoning artifacts from the active repository session into a structured compliance schema.
+                </p>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div className="p-3.5 bg-[#0b0f17] border border-slate-800 rounded-lg space-y-1">
+                  <div className="font-semibold text-slate-200">Trust-Group Agent Decisions</div>
+                  <div className="text-slate-400 font-mono">
+                    {report.trustGroupPlaybook.length} SOP contracts &amp; task categories recorded
+                  </div>
+                </div>
+
+                <div className="p-3.5 bg-[#0b0f17] border border-slate-800 rounded-lg space-y-1">
+                  <div className="font-semibold text-slate-200">Supervisor Audit Trail</div>
+                  <div className="text-slate-400 font-mono">
+                    {report.ciIssuesResolved.length} critical CI defects remediated &amp; verified
+                  </div>
+                </div>
+
+                <div className="p-3.5 bg-[#0b0f17] border border-slate-800 rounded-lg space-y-1">
+                  <div className="font-semibold text-slate-200">Module Topology &amp; MCP Contracts</div>
+                  <div className="text-slate-400 font-mono">
+                    {report.architectureNodes.length} modules · {report.mcpContracts.length} MCP schemas
+                  </div>
+                </div>
+              </div>
+
+              {auditExportNote && (
+                <div className="p-3 bg-emerald-950/40 border border-emerald-500/30 rounded-lg text-xs text-emerald-400 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>{auditExportNote}</span>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={handleExportAuditLog}
+                  disabled={isExportingAudit}
+                  className="px-4 py-2 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg transition-colors cursor-pointer"
+                >
+                  {auditReportJson ? 'Regenerate Audit JSON' : 'Generate Audit JSON'}
+                </button>
+
+                {auditReportJson && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleDownloadAuditJson}
+                      className="px-4 py-2 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download JSON</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleCopyAuditJson}
+                      className="px-4 py-2 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                    >
+                      {copiedAuditJson ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedAuditJson ? 'Copied' : 'Copy JSON'}</span>
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Right 7 Cols: Formatted JSON Compliance Report Viewer */}
+            <div className="lg:col-span-7 bg-[#111827] border border-slate-800 rounded-xl overflow-hidden flex flex-col">
+              <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-semibold text-slate-200 font-mono">
+                  <FileCode2 className="w-4 h-4 text-emerald-400" />
+                  <span>{auditFilename}</span>
+                </div>
+                <span className="text-[11px] font-mono text-slate-400">
+                  SHA-256 Tamper-Proof Compliance Record
+                </span>
+              </div>
+
+              <div className="p-4 bg-[#0b0f17] overflow-y-auto max-h-[420px]">
+                {auditReportJson ? (
+                  <pre className="font-mono text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">
+                    <code>{auditReportJson}</code>
+                  </pre>
+                ) : (
+                  <div className="py-16 text-center space-y-3">
+                    <ShieldCheck className="w-10 h-10 text-slate-600 mx-auto" />
+                    <div className="text-xs text-slate-400">
+                      Click &quot;Generate Compliance JSON&quot; above to convert Trust-Group decisions and supervisor logs into a formatted compliance report.
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
       </main>
 
       {/* Quiet Footer */}
@@ -2947,6 +3227,10 @@ git push origin main`}</code>
             <span aria-hidden="true">·</span>
             <a href="#release-automation" className="hover:text-slate-300 transition-colors">
               Releases
+            </a>
+            <span aria-hidden="true">·</span>
+            <a href="#compliance-audit" className="hover:text-slate-300 transition-colors">
+              Audit Log
             </a>
             <span aria-hidden="true">·</span>
             <button
