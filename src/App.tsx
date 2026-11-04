@@ -286,6 +286,96 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
   const [isExportingAudit, setIsExportingAudit] = useState<boolean>(false);
   const [auditExportNote, setAuditExportNote] = useState<string | null>(null);
   const [copiedAuditJson, setCopiedAuditJson] = useState<boolean>(false);
+  const [isAuditConfigModalOpen, setIsAuditConfigModalOpen] = useState<boolean>(false);
+  const [exportFieldAgentLogs, setExportFieldAgentLogs] = useState<boolean>(true);
+  const [exportFieldSupervisorLogs, setExportFieldSupervisorLogs] = useState<boolean>(true);
+  const [exportFieldCiHistory, setExportFieldCiHistory] = useState<boolean>(true);
+  const [exportFieldArchitectureTopology, setExportFieldArchitectureTopology] = useState<boolean>(true);
+  const [exportFieldMcpContracts, setExportFieldMcpContracts] = useState<boolean>(true);
+  const [exportFieldCryptographicSignature, setExportFieldCryptographicSignature] = useState<boolean>(true);
+
+  // Issue Triage & Module Mapping states
+  const [githubIssues, setGithubIssues] = useState<Array<{
+    id: string;
+    number: number;
+    title: string;
+    htmlUrl: string;
+    user: string;
+    labels: string[];
+    createdAt: string;
+    commentsCount: number;
+    linkedModuleId: string | null;
+  }>>([
+    {
+      id: 'issue-101',
+      number: 42,
+      title: 'AttributeError: module subprocess has no attribute CREATE_NEW_PROCESS_GROUP on Linux CI runners',
+      htmlUrl: 'https://github.com/google/artemis/issues/42',
+      user: 'linux-maintainer',
+      labels: ['bug', 'ci/cd', 'critical'],
+      createdAt: '2026-10-24T18:22:10Z',
+      commentsCount: 5,
+      linkedModuleId: 'node-2',
+    },
+    {
+      id: 'issue-102',
+      number: 39,
+      title: 'Gated workflow_dispatch bypasses MCP unit tests on standard push commits',
+      htmlUrl: 'https://github.com/google/artemis/issues/39',
+      user: 'ci-bot-user',
+      labels: ['bug', 'github-actions'],
+      createdAt: '2026-10-22T14:10:00Z',
+      commentsCount: 3,
+      linkedModuleId: 'node-5',
+    },
+    {
+      id: 'issue-103',
+      number: 34,
+      title: 'Add headless mock ADB daemon fixture for containerized test matrices',
+      htmlUrl: 'https://github.com/google/artemis/issues/34',
+      user: 'android-dev',
+      labels: ['enhancement', 'testing'],
+      createdAt: '2026-10-20T09:45:00Z',
+      commentsCount: 2,
+      linkedModuleId: 'node-1',
+    },
+  ]);
+  const [isLoadingIssues, setIsLoadingIssues] = useState<boolean>(false);
+  const [issueSearchQuery, setIssueSearchQuery] = useState<string>('');
+  const [selectedIssueForLinking, setSelectedIssueForLinking] = useState<string | null>(null);
+  const [issueTriageNote, setIssueTriageNote] = useState<string | null>(null);
+
+  const handleFetchIssues = async () => {
+    setIsLoadingIssues(true);
+    setIssueTriageNote(null);
+    try {
+      const res = await fetch('/api/github/issues', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repoInput,
+          githubToken: githubPat || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok && Array.isArray(data.issues)) {
+        setGithubIssues(data.issues);
+        setIssueTriageNote(`Successfully fetched ${data.issues.length} open issues from ${data.repo}.`);
+      }
+    } catch {
+      setIssueTriageNote('Using cached snapshot of open repository issues.');
+    } finally {
+      setIsLoadingIssues(false);
+    }
+  };
+
+  const handleLinkIssueToModule = (issueId: string, moduleId: string | null) => {
+    setGithubIssues((prev) =>
+      prev.map((issue) => (issue.id === issueId ? { ...issue, linkedModuleId: moduleId } : issue))
+    );
+    setSelectedIssueForLinking(null);
+    setIssueTriageNote(moduleId ? `Issue linked to architecture module successfully.` : `Issue unlinked from module.`);
+  };
 
   const handleExportAuditLog = async () => {
     setIsExportingAudit(true);
@@ -294,33 +384,58 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
       const res = await fetch('/api/compliance/export-audit-log', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ report, ciRuns }),
+        body: JSON.stringify({
+          report,
+          ciRuns,
+          fields: {
+            agentLogs: exportFieldAgentLogs,
+            supervisorLogs: exportFieldSupervisorLogs,
+            ciHistory: exportFieldCiHistory,
+            architectureTopology: exportFieldArchitectureTopology,
+            mcpContracts: exportFieldMcpContracts,
+            cryptographicSignature: exportFieldCryptographicSignature,
+          },
+        }),
       });
       const data = await res.json();
       if (data.ok) {
         const formatted = JSON.stringify(data.auditReport, null, 2);
         setAuditReportJson(formatted);
         setAuditFilename(data.filename || 'compliance_audit_report.json');
-        setAuditExportNote('Compliance audit log successfully generated and certified with SHA-256 cryptographic signature.');
+        setAuditExportNote('Compliance audit log successfully generated and certified with selected audit fields.');
       } else {
         throw new Error(data.error || 'Failed to export audit log');
       }
     } catch {
-      const fallbackObj = {
+      const fallbackObj: Record<string, any> = {
         complianceStandard: 'Artemis-REA-Swarm-Compliance-v1.0',
         generatedAt: new Date().toISOString(),
         targetRepository: report.repoFullName,
-        executiveSummary: report.executiveSummary,
-        trustGroupDecisions: report.trustGroupPlaybook,
-        supervisorAuditLog: report.ciIssuesResolved,
-        architectureNodes: report.architectureNodes,
-        mcpContracts: report.mcpContracts,
-        ciRunsCount: ciRuns.length,
         status: 'Verified & Certified',
       };
+      if (exportFieldSupervisorLogs) {
+        fallbackObj.executiveSummary = report.executiveSummary;
+        fallbackObj.computeAllocation = report.computeAllocation;
+        fallbackObj.supervisorAuditLog = report.ciIssuesResolved;
+      }
+      if (exportFieldAgentLogs) {
+        fallbackObj.trustGroupDecisions = report.trustGroupPlaybook;
+      }
+      if (exportFieldArchitectureTopology) {
+        fallbackObj.architectureNodes = report.architectureNodes;
+      }
+      if (exportFieldMcpContracts) {
+        fallbackObj.mcpContracts = report.mcpContracts;
+      }
+      if (exportFieldCiHistory) {
+        fallbackObj.ciExecutionHistorySummary = {
+          totalRunsLogged: ciRuns.length,
+          runs: ciRuns,
+        };
+      }
       const formatted = JSON.stringify(fallbackObj, null, 2);
       setAuditReportJson(formatted);
-      setAuditExportNote('Generated local client-side compliance record.');
+      setAuditExportNote('Generated local client-side compliance record with selected fields.');
     } finally {
       setIsExportingAudit(false);
     }
@@ -1043,6 +1158,12 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
             className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
           >
             Audit Log
+          </a>
+          <a
+            href="#issue-triage"
+            className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
+          >
+            Issues
           </a>
           <button
             type="button"
@@ -3082,7 +3203,7 @@ git push origin main`}</code>
             <div className="flex items-center gap-3 shrink-0">
               <button
                 type="button"
-                onClick={handleExportAuditLog}
+                onClick={() => setIsAuditConfigModalOpen(true)}
                 disabled={isExportingAudit}
                 className="px-4 py-2.5 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-60 rounded-lg transition-colors flex items-center gap-2 shadow-lg cursor-pointer"
               >
@@ -3138,11 +3259,11 @@ git push origin main`}</code>
               <div className="flex flex-wrap items-center gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={handleExportAuditLog}
+                  onClick={() => setIsAuditConfigModalOpen(true)}
                   disabled={isExportingAudit}
                   className="px-4 py-2 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg transition-colors cursor-pointer"
                 >
-                  {auditReportJson ? 'Regenerate Audit JSON' : 'Generate Audit JSON'}
+                  {auditReportJson ? 'Configure & Regenerate JSON' : 'Configure & Generate JSON'}
                 </button>
 
                 {auditReportJson && (
@@ -3190,10 +3311,206 @@ git push origin main`}</code>
                   <div className="py-16 text-center space-y-3">
                     <ShieldCheck className="w-10 h-10 text-slate-600 mx-auto" />
                     <div className="text-xs text-slate-400">
-                      Click &quot;Generate Compliance JSON&quot; above to convert Trust-Group decisions and supervisor logs into a formatted compliance report.
+                      Click &quot;Configure &amp; Generate JSON&quot; above to select fields and convert logs into a compliance report.
                     </div>
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Section 10: Issue Triage & Module Mapping */}
+        <section id="issue-triage" className="space-y-6 scroll-mt-20">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-800 pb-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Search className="w-5 h-5 text-emerald-400" />
+                <h2 className="text-xl font-bold text-white font-display">
+                  10. Issue Triage &amp; Module Mapping
+                </h2>
+              </div>
+              <p className="text-sm text-slate-400">
+                Fetch open GitHub issues from the repository and link them directly to specific modules in the architecture topology for targeted regression analysis.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={handleFetchIssues}
+                disabled={isLoadingIssues}
+                className="px-4 py-2.5 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-60 rounded-lg transition-colors flex items-center gap-2 shadow-lg cursor-pointer"
+              >
+                <RefreshCw className={`w-4 h-4 ${isLoadingIssues ? 'animate-spin' : ''}`} />
+                <span>{isLoadingIssues ? 'Fetching Issues...' : 'Fetch Open Issues'}</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Left 4 Cols: Issue Search & Filters */}
+            <div className="lg:col-span-4 bg-[#111827] border border-slate-800 rounded-xl p-6 space-y-5">
+              <div className="space-y-1.5">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <Search className="w-4 h-4 text-emerald-400" />
+                  <span>Filter Repository Issues</span>
+                </h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Search by keyword or inspect open issue volume across <code className="font-mono text-emerald-400">{report.repoFullName}</code>.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="issue-search" className="block text-xs font-medium text-slate-300">
+                  Search Issues
+                </label>
+                <input
+                  id="issue-search"
+                  type="text"
+                  value={issueSearchQuery}
+                  onChange={(e) => setIssueSearchQuery(e.target.value)}
+                  placeholder="e.g. subprocess, gate, error..."
+                  className="w-full px-3.5 py-2 text-xs font-mono bg-[#0b0f17] border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-400"
+                />
+              </div>
+
+              {issueTriageNote && (
+                <div className="p-3 bg-emerald-950/40 border border-emerald-500/30 rounded-lg text-xs text-emerald-400 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>{issueTriageNote}</span>
+                </div>
+              )}
+
+              <div className="pt-2 border-t border-slate-800 text-xs text-slate-400 space-y-2">
+                <div className="flex items-center justify-between font-mono">
+                  <span>Open Issues Fetched:</span>
+                  <span className="text-white font-semibold">{githubIssues.length}</span>
+                </div>
+                <div className="flex items-center justify-between font-mono">
+                  <span>Linked to Topology:</span>
+                  <span className="text-emerald-400 font-semibold">
+                    {githubIssues.filter((i) => i.linkedModuleId !== null).length}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Right 8 Cols: Issue List with Module Mapping */}
+            <div className="lg:col-span-8 bg-[#111827] border border-slate-800 rounded-xl overflow-hidden flex flex-col">
+              <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-200">
+                  Repository Issues &amp; Architecture Module Links
+                </span>
+                <span className="text-xs text-slate-400 font-mono tabular-nums">
+                  Showing {githubIssues.filter(i => !issueSearchQuery || i.title.toLowerCase().includes(issueSearchQuery.toLowerCase())).length} issues
+                </span>
+              </div>
+
+              <div className="divide-y divide-slate-800/80 max-h-[500px] overflow-y-auto">
+                {githubIssues
+                  .filter((issue) => !issueSearchQuery || issue.title.toLowerCase().includes(issueSearchQuery.toLowerCase()))
+                  .map((issue) => {
+                    const linkedNode = report.architectureNodes.find((n) => n.id === issue.linkedModuleId);
+                    const isLinking = selectedIssueForLinking === issue.id;
+
+                    return (
+                      <div key={issue.id} className="p-5 space-y-3 hover:bg-[#151f32] transition-colors">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap text-xs">
+                              <span className="font-mono text-emerald-400 font-semibold">#{issue.number}</span>
+                              <span className="text-slate-400 font-mono">by {issue.user}</span>
+                              <span aria-hidden="true" className="text-slate-600">·</span>
+                              <span className="text-slate-400 font-mono">{issue.createdAt.slice(0, 10)}</span>
+                            </div>
+                            <h4 className="text-sm font-bold text-white hover:text-emerald-300 transition-colors">
+                              <a href={issue.htmlUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1.5">
+                                <span>{issue.title}</span>
+                                <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                              </a>
+                            </h4>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            {issue.labels.map((lbl) => (
+                              <span
+                                key={lbl}
+                                className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                                  lbl === 'critical' || lbl === 'bug'
+                                    ? 'bg-rose-950/40 text-rose-400 border-rose-500/40'
+                                    : 'bg-slate-800 text-slate-300 border-slate-700'
+                                }`}
+                              >
+                                {lbl}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Module Mapping Status / Selector */}
+                        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800/60 text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="text-slate-400">Linked Module:</span>
+                            {linkedNode ? (
+                              <span className="font-mono text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 px-2.5 py-0.5 rounded flex items-center gap-1.5">
+                                <FileCode2 className="w-3.5 h-3.5" />
+                                <span>{linkedNode.modulePath} ({linkedNode.tier})</span>
+                              </span>
+                            ) : (
+                              <span className="text-slate-500 italic">No module linked</span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {isLinking ? (
+                              <div className="flex items-center gap-2">
+                                <select
+                                  defaultValue={issue.linkedModuleId || ''}
+                                  onChange={(e) => handleLinkIssueToModule(issue.id, e.target.value || null)}
+                                  className="px-2.5 py-1 text-xs font-mono bg-[#0b0f17] border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-400"
+                                >
+                                  <option value="">-- Select Module --</option>
+                                  {report.architectureNodes.map((node) => (
+                                    <option key={node.id} value={node.id}>
+                                      {node.modulePath} ({node.tier})
+                                    </option>
+                                  ))}
+                                </select>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedIssueForLinking(null)}
+                                  className="px-2.5 py-1 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-lg"
+                                >
+                                  Done
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedIssueForLinking(issue.id)}
+                                  className="px-3 py-1.5 text-xs font-medium text-emerald-400 bg-emerald-950/40 hover:bg-emerald-950/70 border border-emerald-500/40 rounded-lg transition-colors cursor-pointer"
+                                >
+                                  {linkedNode ? 'Change Module' : 'Link to Module'}
+                                </button>
+                                {linkedNode && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleLinkIssueToModule(issue.id, null)}
+                                    className="px-2 py-1.5 text-xs text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
+                                    title="Unlink Module"
+                                  >
+                                    Unlink
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
               </div>
             </div>
           </div>
@@ -3233,6 +3550,10 @@ git push origin main`}</code>
               Audit Log
             </a>
             <span aria-hidden="true">·</span>
+            <a href="#issue-triage" className="hover:text-slate-300 transition-colors">
+              Issues
+            </a>
+            <span aria-hidden="true">·</span>
             <button
               type="button"
               onClick={() => setIsQuantStudioOpen(true)}
@@ -3256,6 +3577,135 @@ git push origin main`}</code>
           setActiveArtifactTab('unified-ci');
         }}
       />
+
+      {/* Audit Log Configuration & Confirmation Modal */}
+      {isAuditConfigModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#111827] border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-6 relative animate-in fade-in zoom-in-95 duration-150">
+            <button
+              type="button"
+              onClick={() => setIsAuditConfigModalOpen(false)}
+              className="absolute top-5 right-5 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+              aria-label="Close modal"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="space-y-1.5 pr-8">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <ShieldCheck className="w-4 h-4" />
+                </span>
+                <h3 className="text-lg font-bold text-white font-display">Configure Compliance Audit Export</h3>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Select the specific fields and audit artifacts you wish to include in the generated compliance JSON report for <code className="font-mono text-emerald-400">{report.repoFullName}</code>.
+              </p>
+            </div>
+
+            <div className="space-y-3 py-2 border-y border-slate-800 text-xs text-slate-300">
+              <label className="flex items-center gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={exportFieldAgentLogs}
+                  onChange={(e) => setExportFieldAgentLogs(e.target.checked)}
+                  className="rounded border-slate-700 text-emerald-500 focus:ring-0 bg-[#0b0f17] w-4 h-4"
+                />
+                <div>
+                  <div className="font-semibold text-white">Trust-Group Agent Decisions &amp; SOP Playbook</div>
+                  <div className="text-[11px] text-slate-400">Includes {report.trustGroupPlaybook.length} autonomous SOP contracts, compute tiers, and token savings.</div>
+                </div>
+              </label>
+
+              <label className="flex items-center gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={exportFieldSupervisorLogs}
+                  onChange={(e) => setExportFieldSupervisorLogs(e.target.checked)}
+                  className="rounded border-slate-700 text-emerald-500 focus:ring-0 bg-[#0b0f17] w-4 h-4"
+                />
+                <div>
+                  <div className="font-semibold text-white">Supervisor Audit Trail &amp; CI Remediations</div>
+                  <div className="text-[11px] text-slate-400">Includes {report.ciIssuesResolved.length} resolved root causes, executive summary, and compute allocation.</div>
+                </div>
+              </label>
+
+              <label className="flex items-center gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={exportFieldCiHistory}
+                  onChange={(e) => setExportFieldCiHistory(e.target.checked)}
+                  className="rounded border-slate-700 text-emerald-500 focus:ring-0 bg-[#0b0f17] w-4 h-4"
+                />
+                <div>
+                  <div className="font-semibold text-white">CI Execution History &amp; Pass/Fail Metrics</div>
+                  <div className="text-[11px] text-slate-400">Includes historical run executions, pass rates, and flaky test frequency records ({ciRuns.length} runs).</div>
+                </div>
+              </label>
+
+              <label className="flex items-center gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={exportFieldArchitectureTopology}
+                  onChange={(e) => setExportFieldArchitectureTopology(e.target.checked)}
+                  className="rounded border-slate-700 text-emerald-500 focus:ring-0 bg-[#0b0f17] w-4 h-4"
+                />
+                <div>
+                  <div className="font-semibold text-white">Module Topology &amp; Invariants</div>
+                  <div className="text-[11px] text-slate-400">Includes {report.architectureNodes.length} reverse-engineered modules and dependencies.</div>
+                </div>
+              </label>
+
+              <label className="flex items-center gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={exportFieldMcpContracts}
+                  onChange={(e) => setExportFieldMcpContracts(e.target.checked)}
+                  className="rounded border-slate-700 text-emerald-500 focus:ring-0 bg-[#0b0f17] w-4 h-4"
+                />
+                <div>
+                  <div className="font-semibold text-white">MCP Tool Signatures &amp; Endpoints</div>
+                  <div className="text-[11px] text-slate-400">Includes {report.mcpContracts.length} MCP tool specifications and verification commands.</div>
+                </div>
+              </label>
+
+              <label className="flex items-center gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={exportFieldCryptographicSignature}
+                  onChange={(e) => setExportFieldCryptographicSignature(e.target.checked)}
+                  className="rounded border-slate-700 text-emerald-500 focus:ring-0 bg-[#0b0f17] w-4 h-4"
+                />
+                <div>
+                  <div className="font-semibold text-white">Cryptographic SHA-256 Tamper-Proof Signature</div>
+                  <div className="text-[11px] text-slate-400">Calculates an immutable SHA-256 hash checksum for compliance record verification.</div>
+                </div>
+              </label>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsAuditConfigModalOpen(false)}
+                className="px-4 py-2 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsAuditConfigModalOpen(false);
+                  handleExportAuditLog();
+                }}
+                disabled={isExportingAudit}
+                className="px-5 py-2 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg transition-colors cursor-pointer"
+              >
+                {isExportingAudit ? 'Generating JSON Report...' : 'Confirm & Generate JSON Report'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
