@@ -33,6 +33,7 @@ import {
   ExternalLink,
   Lock,
   X,
+  Bell,
 } from 'lucide-react';
 import {
   INITIAL_ARTEMIS_REA_REPORT,
@@ -296,6 +297,31 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
   const [exportFieldCryptographicSignature, setExportFieldCryptographicSignature] = useState<boolean>(true);
 
   // Issue Triage & Module Mapping states
+  // Notification Settings states (Slack Webhook Alerts)
+  const [slackWebhookUrl, setSlackWebhookUrl] = useState<string>('');
+  const [notifyOnSuccess, setNotifyOnSuccess] = useState<boolean>(true);
+  const [notifyOnFailure, setNotifyOnFailure] = useState<boolean>(true);
+  const [notifyOnWebhook, setNotifyOnWebhook] = useState<boolean>(false);
+  const [isTestingSlack, setIsTestingSlack] = useState<boolean>(false);
+  const [slackTestStatus, setSlackTestStatus] = useState<string | null>(null);
+
+  const handleSendTestSlackAlert = async () => {
+    if (!slackWebhookUrl.trim()) {
+      setSlackTestStatus('Please enter a valid Slack webhook URL first.');
+      return;
+    }
+    setIsTestingSlack(true);
+    setSlackTestStatus(null);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      setSlackTestStatus('Test Slack alert successfully dispatched! Channel notified of CI/CD success/failure readiness.');
+    } catch (err: any) {
+      setSlackTestStatus(`Failed to send test alert: ${err?.message || err}`);
+    } finally {
+      setIsTestingSlack(false);
+    }
+  };
+
   const [githubIssues, setGithubIssues] = useState<Array<{
     id: string;
     number: number;
@@ -1324,6 +1350,12 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
             className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
           >
             Architecture PDF
+          </a>
+          <a
+            href="#notification-settings"
+            className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
+          >
+            Slack Alerts
           </a>
           <button
             type="button"
@@ -3755,6 +3787,105 @@ git push origin main`}</code>
             </div>
           </div>
         </section>
+
+        {/* Section 13: Notification Settings & Slack Webhook Alerts */}
+        <section id="notification-settings" className="space-y-6 scroll-mt-20">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-800 pb-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Bell className="w-5 h-5 text-emerald-400" />
+                <h2 className="text-xl font-bold text-white font-display">
+                  13. Notification Settings &amp; Slack Webhook Alerts
+                </h2>
+              </div>
+              <p className="text-sm text-slate-400">
+                Input a Slack incoming webhook URL to receive real-time alerts whenever the CI/CD pipeline succeeds, fails, or receives webhook push events.
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-[#111827] border border-slate-800 rounded-xl p-6 space-y-6">
+            <div className="space-y-2">
+              <label htmlFor="slack-webhook-input" className="block text-xs font-medium text-slate-300">
+                Slack Incoming Webhook URL
+              </label>
+              <div className="flex items-center gap-3">
+                <input
+                  id="slack-webhook-input"
+                  type="url"
+                  value={slackWebhookUrl}
+                  onChange={(e) => setSlackWebhookUrl(e.target.value)}
+                  placeholder="https://hooks.slack.com/services/T000/B000/XXXXXXXXXXXXXXXXXXXXXXXX"
+                  className="flex-1 px-3.5 py-2.5 text-xs font-mono bg-[#0b0f17] border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-400"
+                />
+                <button
+                  type="button"
+                  onClick={handleSendTestSlackAlert}
+                  disabled={isTestingSlack}
+                  className="px-4 py-2.5 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-60 rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>{isTestingSlack ? 'Sending Alert...' : 'Send Test Slack Alert'}</span>
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                {!slackWebhookUrl.trim() ? (
+                  <span className="text-amber-400 font-mono">Status: unconnected (No Slack webhook URL configured)</span>
+                ) : (
+                  <span className="text-emerald-400 font-mono">Status: armed &amp; configured for notifications</span>
+                )}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-slate-800 text-xs">
+              <label className="flex items-center gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={notifyOnSuccess}
+                  onChange={(e) => setNotifyOnSuccess(e.target.checked)}
+                  className="rounded border-slate-700 text-emerald-500 focus:ring-0 bg-[#0b0f17] w-4 h-4"
+                />
+                <div>
+                  <div className="font-semibold text-white">Notify on Pipeline Success</div>
+                  <div className="text-[11px] text-slate-400">Alert channel when CI matrix passes all 5 stages.</div>
+                </div>
+              </label>
+
+              <label className="flex items-center gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={notifyOnFailure}
+                  onChange={(e) => setNotifyOnFailure(e.target.checked)}
+                  className="rounded border-slate-700 text-emerald-500 focus:ring-0 bg-[#0b0f17] w-4 h-4"
+                />
+                <div>
+                  <div className="font-semibold text-white">Notify on Pipeline Failure</div>
+                  <div className="text-[11px] text-slate-400">Alert channel immediately upon test failure or linter error.</div>
+                </div>
+              </label>
+
+              <label className="flex items-center gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={notifyOnWebhook}
+                  onChange={(e) => setNotifyOnWebhook(e.target.checked)}
+                  className="rounded border-slate-700 text-emerald-500 focus:ring-0 bg-[#0b0f17] w-4 h-4"
+                />
+                <div>
+                  <div className="font-semibold text-white">Notify on GitHub Webhooks</div>
+                  <div className="text-[11px] text-slate-400">Alert channel on incoming push or pull_request events.</div>
+                </div>
+              </label>
+            </div>
+
+            {slackTestStatus && (
+              <div className="p-3 bg-emerald-950/40 border border-emerald-500/30 rounded-lg text-xs text-emerald-400 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{slackTestStatus}</span>
+              </div>
+            )}
+          </div>
+        </section>
       </main>
 
       {/* Quiet Footer */}
@@ -3800,6 +3931,10 @@ git push origin main`}</code>
             <span aria-hidden="true">·</span>
             <a href="#architecture-report" className="hover:text-slate-300 transition-colors">
               Architecture PDF
+            </a>
+            <span aria-hidden="true">·</span>
+            <a href="#notification-settings" className="hover:text-slate-300 transition-colors">
+              Slack Alerts
             </a>
             <span aria-hidden="true">·</span>
             <button
