@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { jsPDF } from 'jspdf';
+import JSZip from 'jszip';
 import {
   Play,
   CheckCircle2,
@@ -46,12 +47,14 @@ import {
   OPENCODE_PIPELINE_STEPS,
   INITIAL_HISTORICAL_CI_RUNS,
   INITIAL_FLAKY_TEST_RECORDS,
+  INITIAL_QUANT_TEMPLATES,
   ReverseEngineeringReport,
   ArchitectureNode,
   TrustGroupSop,
   HistoricalCiExecution,
   FlakyTestRecord,
   PipelineStep,
+  QuantWorkflowTemplate,
 } from './data/presets';
 import ModuleTopologyGraph, { TopologyGraphNode } from './components/ModuleTopologyGraph';
 import PipelineHealthChart from './components/PipelineHealthChart';
@@ -563,6 +566,334 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
       setStatusMessage('Architecture Report PDF generated and downloaded successfully.');
     } catch (err: any) {
       setErrorMessage(`Failed to generate PDF: ${err?.message || err}`);
+    }
+  };
+
+  // Project ZIP Export states & helpers
+  const [exportingZipKey, setExportingZipKey] = useState<string | null>(null);
+  const [zipExportNote, setZipExportNote] = useState<string | null>(null);
+
+  const triggerBlobDownload = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const buildReportZipBlob = async (
+    targetReport: ReverseEngineeringReport,
+    patchPath: string,
+    testPath: string
+  ): Promise<Blob> => {
+    const zip = new JSZip();
+
+    const readmeContent = `# ${targetReport.repoFullName}
+
+Repository URL: ${targetReport.repoUrl}
+Default Branch: ${targetReport.defaultBranch}
+Analyzed At: ${targetReport.analyzedAt}
+
+## Executive Summary
+${targetReport.executiveSummary}
+
+## Compute Allocation
+- Supervisor Share: ${targetReport.computeAllocation.supervisorSharePct}%
+- Worker Share: ${targetReport.computeAllocation.workerSharePct}%
+- Estimated Cost Reduction: ${targetReport.computeAllocation.estimatedCostReductionPct}%
+- Rationale: ${targetReport.computeAllocation.tacticalRationale}
+
+## CI/CD Issues Resolved (${targetReport.ciIssuesResolved.length})
+${targetReport.ciIssuesResolved
+  .map((issue) => `- [${issue.id}] (${issue.severity}) ${issue.file}: ${issue.rootCause} -> ${issue.fixApplied}`)
+  .join('\n')}
+
+## Included Artifacts
+- .github/workflows/ci.yml (Unified CI/CD Pipeline)
+- .github/workflows/ci.baseline.yml (Baseline CI)
+- ${patchPath}
+- ${testPath}
+- architecture/architecture_report.json
+`;
+
+    zip.file('README.md', readmeContent);
+    zip.file('.github/workflows/ci.yml', targetReport.unifiedCiYaml);
+    zip.file('.github/workflows/ci.baseline.yml', targetReport.originalCiYaml);
+    zip.file(patchPath, targetReport.posixPatchCode);
+    zip.file(testPath, targetReport.generatedTestSuite);
+    zip.file(
+      'architecture/architecture_report.json',
+      JSON.stringify(
+        {
+          repoFullName: targetReport.repoFullName,
+          repoUrl: targetReport.repoUrl,
+          defaultBranch: targetReport.defaultBranch,
+          executiveSummary: targetReport.executiveSummary,
+          computeAllocation: targetReport.computeAllocation,
+          ciIssuesResolved: targetReport.ciIssuesResolved,
+          architectureNodes: targetReport.architectureNodes,
+          mcpContracts: targetReport.mcpContracts,
+          trustGroupPlaybook: targetReport.trustGroupPlaybook,
+        },
+        null,
+        2
+      )
+    );
+
+    return zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+  };
+
+  const buildQuantZipBlob = async (template: QuantWorkflowTemplate): Promise<Blob> => {
+    const zip = new JSZip();
+    const readmeContent = `# ${template.title}
+
+Source Repository: ${template.repoName}
+Target Asset Class: ${template.targetAssetClass}
+Timeframe: ${template.timeframe}
+
+## Description
+${template.description}
+
+## Backtest Reference Metrics
+- Sharpe Ratio: ${template.backtestMetrics.sharpeRatio}
+- Annualized Return: ${template.backtestMetrics.annualizedReturnPct}%
+- Max Drawdown: ${template.backtestMetrics.maxDrawdownPct}%
+- Win Rate: ${template.backtestMetrics.winRatePct}%
+- Total Trades: ${template.backtestMetrics.totalTrades}
+- Profit Factor: ${template.backtestMetrics.profitFactor}
+`;
+    zip.file('README.md', readmeContent);
+    zip.file('strategy_pipeline.py', template.generatedPythonStrategy);
+    zip.file('.github/workflows/ci.yml', template.generatedCiWorkflow);
+    zip.file('workflow_nodes.json', JSON.stringify(template.nodes, null, 2));
+
+    return zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+  };
+
+  const projectZipCatalog = useMemo(() => {
+    const baseProjects: Array<{
+      key: string;
+      name: string;
+      repo: string;
+      zipFilename: string;
+      description: string;
+      kind: 'rea' | 'quant';
+      reportData?: ReverseEngineeringReport;
+      patchPath?: string;
+      testPath?: string;
+      quantTemplate?: QuantWorkflowTemplate;
+    }> = [
+      {
+        key: 'artemis',
+        name: 'Google Artemis + REA',
+        repo: 'google/artemis',
+        zipFilename: 'google_artemis_rea.zip',
+        description: 'Unified REA + Artemis CI/CD workflow, POSIX subprocess compat shim, pytest suite, and MCP architecture.',
+        kind: 'rea',
+        reportData: INITIAL_ARTEMIS_REA_REPORT,
+        patchPath: 'mcp_server/utils/posix_compat.py',
+        testPath: 'tests/unit/mcp/test_rea_artemis_pipeline.py',
+      },
+      {
+        key: 'netflix',
+        name: 'Netflix OSS & Client REA',
+        repo: 'Netflix/conductor',
+        zipFilename: 'netflix_conductor_rea.zip',
+        description: 'Netflix Conductor workflow orchestration CI, resilience shims, and non-DRM microservice MCP contracts.',
+        kind: 'rea',
+        reportData: NETFLIX_REA_REPORT,
+        patchPath: 'conductor_bridge/posix_compat.py',
+        testPath: 'tests/unit/conductor/test_conductor_workflow.py',
+      },
+      {
+        key: 'jev',
+        name: 'JEV Typed Decision Agent',
+        repo: JEV_REPO_REPORT.repoFullName,
+        zipFilename: 'jev_typesafe_agent.zip',
+        description: 'JEV typed discrete decision engine, 88% token context compactor, latency gates, and pytest benchmarks.',
+        kind: 'rea',
+        reportData: JEV_REPO_REPORT,
+        patchPath: 'jev_core/posix_compat.py',
+        testPath: 'tests/bench/test_decision_latency.py',
+      },
+      {
+        key: 'opencode',
+        name: 'OpenCode Monorepo',
+        repo: 'redwinemegan61-stack/opencode',
+        zipFilename: 'opencode_monorepo.zip',
+        description: 'Bun & Turbo monorepo CI pipeline, cross-platform build flag normalizer, and Playwright/CLI smoke tests.',
+        kind: 'rea',
+        reportData: OPENCODE_REA_REPORT,
+        patchPath: 'packages/cli/script/workspace_compat.ts',
+        testPath: 'packages/cli/script/service-smoke.test.ts',
+      },
+      ...INITIAL_QUANT_TEMPLATES.map((tpl) => ({
+        key: tpl.id,
+        name: `Quant: ${tpl.title}`,
+        repo: tpl.repoName,
+        zipFilename: `${tpl.id.replace(/[^a-z0-9]+/gi, '_')}.zip`,
+        description: `${tpl.targetAssetClass} (${tpl.timeframe}) workflow nodes, Python strategy pipeline, and CI regression workflow.`,
+        kind: 'quant' as const,
+        quantTemplate: tpl,
+      })),
+    ];
+
+    const isCustomActive =
+      report.repoFullName !== INITIAL_ARTEMIS_REA_REPORT.repoFullName &&
+      report.repoFullName !== NETFLIX_REA_REPORT.repoFullName &&
+      report.repoFullName !== JEV_REPO_REPORT.repoFullName &&
+      report.repoFullName !== OPENCODE_REA_REPORT.repoFullName;
+
+    if (isCustomActive) {
+      const slug = report.repoFullName.replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+      baseProjects.unshift({
+        key: 'active-custom',
+        name: `Active Target: ${report.repoFullName}`,
+        repo: report.repoFullName,
+        zipFilename: `${slug}_project.zip`,
+        description: 'Currently loaded repository report, synthesized CI/CD YAML, patches, and architecture contracts.',
+        kind: 'rea',
+        reportData: report,
+        patchPath: 'mcp_server/utils/posix_compat.py',
+        testPath: 'tests/unit/test_swarm_pipeline.py',
+      });
+    }
+
+    return baseProjects;
+  }, [report]);
+
+  const handleDownloadSingleProjectZip = async (projectKey: string) => {
+    const item = projectZipCatalog.find((p) => p.key === projectKey);
+    if (!item) return;
+    setExportingZipKey(projectKey);
+    setZipExportNote(null);
+
+    try {
+      let blob: Blob;
+      if (item.kind === 'rea' && item.reportData) {
+        blob = await buildReportZipBlob(
+          item.reportData,
+          item.patchPath || 'mcp_server/utils/posix_compat.py',
+          item.testPath || 'tests/unit/test_pipeline.py'
+        );
+      } else if (item.kind === 'quant' && item.quantTemplate) {
+        blob = await buildQuantZipBlob(item.quantTemplate);
+      } else {
+        throw new Error('Project data unavailable');
+      }
+      triggerBlobDownload(blob, item.zipFilename);
+      setZipExportNote(`Downloaded ${item.zipFilename} (${item.name}).`);
+    } catch (err: any) {
+      setErrorMessage(`Failed to generate ZIP for ${item.name}: ${err?.message || err}`);
+    } finally {
+      setExportingZipKey(null);
+    }
+  };
+
+  const handleDownloadWorkspaceSourceZip = async () => {
+    setExportingZipKey('workspace-source');
+    setZipExportNote(null);
+    try {
+      const res = await fetch('/api/projects/export-workspace-zip');
+      if (!res.ok) {
+        throw new Error(`Server returned ${res.status}`);
+      }
+      const blob = await res.blob();
+      triggerBlobDownload(blob, 'artemis_rea_studio_source.zip');
+      setZipExportNote('Downloaded artemis_rea_studio_source.zip (full Studio source code).');
+    } catch (err: any) {
+      setErrorMessage(`Failed to download Studio source ZIP: ${err?.message || err}`);
+    } finally {
+      setExportingZipKey(null);
+    }
+  };
+
+  const handleDownloadAllProjectZips = async () => {
+    setExportingZipKey('all-individual');
+    setZipExportNote('Packaging and downloading each project ZIP sequentially...');
+    try {
+      for (let i = 0; i < projectZipCatalog.length; i++) {
+        const item = projectZipCatalog[i];
+        let blob: Blob;
+        if (item.kind === 'rea' && item.reportData) {
+          blob = await buildReportZipBlob(
+            item.reportData,
+            item.patchPath || 'mcp_server/utils/posix_compat.py',
+            item.testPath || 'tests/unit/test_pipeline.py'
+          );
+        } else if (item.kind === 'quant' && item.quantTemplate) {
+          blob = await buildQuantZipBlob(item.quantTemplate);
+        } else {
+          continue;
+        }
+        triggerBlobDownload(blob, item.zipFilename);
+        await new Promise((r) => setTimeout(r, 350));
+      }
+      // Also download workspace source zip
+      try {
+        const res = await fetch('/api/projects/export-workspace-zip');
+        if (res.ok) {
+          const wsBlob = await res.blob();
+          triggerBlobDownload(wsBlob, 'artemis_rea_studio_source.zip');
+        }
+      } catch {
+        // Ignore if backend unreachable
+      }
+      setZipExportNote(
+        `Triggered individual .zip downloads for all ${projectZipCatalog.length} project repositories plus the Studio source archive.`
+      );
+    } catch (err: any) {
+      setErrorMessage(`Batch ZIP download interrupted: ${err?.message || err}`);
+    } finally {
+      setExportingZipKey(null);
+    }
+  };
+
+  const handleDownloadCombinedMasterZip = async () => {
+    setExportingZipKey('master-bundle');
+    setZipExportNote(null);
+    try {
+      const masterZip = new JSZip();
+      for (const item of projectZipCatalog) {
+        let projectBlob: Blob;
+        if (item.kind === 'rea' && item.reportData) {
+          projectBlob = await buildReportZipBlob(
+            item.reportData,
+            item.patchPath || 'mcp_server/utils/posix_compat.py',
+            item.testPath || 'tests/unit/test_pipeline.py'
+          );
+        } else if (item.kind === 'quant' && item.quantTemplate) {
+          projectBlob = await buildQuantZipBlob(item.quantTemplate);
+        } else {
+          continue;
+        }
+        masterZip.file(item.zipFilename, projectBlob);
+      }
+
+      try {
+        const res = await fetch('/api/projects/export-workspace-zip');
+        if (res.ok) {
+          const wsBlob = await res.blob();
+          masterZip.file('artemis_rea_studio_source.zip', wsBlob);
+        }
+      } catch {
+        // Ignore if backend unreachable
+      }
+
+      const masterBlob = await masterZip.generateAsync({
+        type: 'blob',
+        compression: 'DEFLATE',
+        compressionOptions: { level: 6 },
+      });
+      triggerBlobDownload(masterBlob, `all_projects_zips_${new Date().toISOString().slice(0, 10)}.zip`);
+      setZipExportNote('Downloaded combined archive containing every project .zip file inside.');
+    } catch (err: any) {
+      setErrorMessage(`Failed to generate combined bundle: ${err?.message || err}`);
+    } finally {
+      setExportingZipKey(null);
     }
   };
 
@@ -1340,12 +1671,6 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
             Issues
           </a>
           <a
-            href="#gwens-round-table"
-            className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
-          >
-            Round Table
-          </a>
-          <a
             href="#architecture-report"
             className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
           >
@@ -1356,6 +1681,12 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and L
             className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
           >
             Slack Alerts
+          </a>
+          <a
+            href="#project-zips"
+            className="hover:text-white hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
+          >
+            ZIP Exports
           </a>
           <button
             type="button"
@@ -3886,6 +4217,135 @@ git push origin main`}</code>
             )}
           </div>
         </section>
+
+        {/* Section 14: Project ZIP Archives & Bundle Exporter */}
+        <section id="project-zips" className="space-y-6 scroll-mt-20">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-800 pb-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <PackageCheck className="w-5 h-5 text-emerald-400" />
+                <h2 className="text-xl font-bold text-white font-display">
+                  14. Project ZIP Archives &amp; Bundle Exporter
+                </h2>
+              </div>
+              <p className="text-sm text-slate-400">
+                Download a complete <code className="font-mono text-emerald-400">.zip</code> archive for each of your projects (CI workflows, compatibility patches, test suites, and architecture reports) plus the full Studio source code.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+              <button
+                type="button"
+                onClick={handleDownloadAllProjectZips}
+                disabled={exportingZipKey !== null}
+                className="px-4 py-2.5 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-60 rounded-lg transition-colors flex items-center gap-2 shadow-lg cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>
+                  {exportingZipKey === 'all-individual'
+                    ? 'Downloading All ZIPs...'
+                    : 'Download Each Project (.zip)'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDownloadCombinedMasterZip}
+                disabled={exportingZipKey !== null}
+                className="px-4 py-2.5 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 disabled:opacity-60 rounded-lg transition-colors flex items-center gap-2 cursor-pointer"
+              >
+                <PackageCheck className="w-4 h-4 text-emerald-400" />
+                <span>
+                  {exportingZipKey === 'master-bundle'
+                    ? 'Packaging Bundle...'
+                    : 'Download All-in-One (.zip of ZIPs)'}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {zipExportNote && (
+            <div className="p-3 bg-emerald-950/40 border border-emerald-500/30 rounded-lg text-xs text-emerald-400 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>{zipExportNote}</span>
+            </div>
+          )}
+
+          {/* Studio Source Code Card */}
+          <div className="p-5 bg-gradient-to-r from-emerald-950/35 via-[#111827] to-[#111827] border border-emerald-500/30 rounded-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="text-sm font-bold text-white flex flex-wrap items-center gap-2">
+                <span>Artemis &amp; REA Swarm Studio (Full App Source)</span>
+                <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950 border border-emerald-500/40 px-2 py-0.5 rounded">
+                  artemis_rea_studio_source.zip
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed max-w-2xl">
+                Packages the actual workspace source files (<code className="font-mono text-slate-200">src/</code>, <code className="font-mono text-slate-200">server.ts</code>, <code className="font-mono text-slate-200">package.json</code>, <code className="font-mono text-slate-200">vite.config.ts</code>) directly from disk.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleDownloadWorkspaceSourceZip}
+              disabled={exportingZipKey !== null}
+              className="px-4 py-2 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-60 rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>
+                {exportingZipKey === 'workspace-source' ? 'Packaging Source...' : 'Download Studio .zip'}
+              </span>
+            </button>
+          </div>
+
+          {/* Individual Project ZIP Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {projectZipCatalog.map((proj) => {
+              const isConnected = Boolean(githubPat.trim());
+              return (
+                <div
+                  key={proj.key}
+                  className="bg-[#111827] border border-slate-800 rounded-xl p-5 flex flex-col justify-between space-y-4"
+                >
+                  <div className="space-y-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-sm font-bold text-white">{proj.name}</h3>
+                        <p className="text-xs font-mono text-emerald-400">{proj.repo}</p>
+                      </div>
+                      <span
+                        className={`text-[10px] font-mono px-2 py-0.5 rounded border whitespace-nowrap ${
+                          isConnected
+                            ? 'text-emerald-400 bg-emerald-950/50 border-emerald-500/40'
+                            : 'text-amber-300 bg-amber-950/30 border-amber-500/30'
+                        }`}
+                      >
+                        {isConnected ? 'GitHub Linked' : 'Unconnected (Local Snapshot)'}
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-slate-400 leading-relaxed">{proj.description}</p>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-mono text-slate-400 truncate" title={proj.zipFilename}>
+                      {proj.zipFilename}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadSingleProjectZip(proj.key)}
+                      disabled={exportingZipKey !== null}
+                      className="px-3 py-1.5 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-60 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>{exportingZipKey === proj.key ? 'Zipping...' : 'Download .zip'}</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
       </main>
 
       {/* Quiet Footer */}
@@ -3925,16 +4385,16 @@ git push origin main`}</code>
               Issues
             </a>
             <span aria-hidden="true">·</span>
-            <a href="#gwens-round-table" className="hover:text-slate-300 transition-colors">
-              Round Table
-            </a>
-            <span aria-hidden="true">·</span>
             <a href="#architecture-report" className="hover:text-slate-300 transition-colors">
               Architecture PDF
             </a>
             <span aria-hidden="true">·</span>
             <a href="#notification-settings" className="hover:text-slate-300 transition-colors">
               Slack Alerts
+            </a>
+            <span aria-hidden="true">·</span>
+            <a href="#project-zips" className="hover:text-slate-300 transition-colors">
+              ZIP Exports
             </a>
             <span aria-hidden="true">·</span>
             <button

@@ -1,8 +1,10 @@
 import express from 'express';
 import crypto from 'crypto';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import JSZip from 'jszip';
 import { GoogleGenAI, Type } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import {
@@ -1474,6 +1476,47 @@ All 5 CI/CD pipeline stages verified passing with zero-touch push triggers and P
       res.status(500).json({
         ok: false,
         error: err?.message || 'Failed to export compliance audit log',
+      });
+    }
+  });
+
+  app.get('/api/projects/export-workspace-zip', async (_req, res) => {
+    try {
+      const zip = new JSZip();
+      const ignoredDirs = new Set(['node_modules', 'dist', '.git', '.next', '.vite']);
+
+      const addDirToZip = (currentDir: string, zipFolder: JSZip) => {
+        const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (ignoredDirs.has(entry.name)) continue;
+          if (entry.name.endsWith('.zip') || entry.name === '.env') continue;
+          const fullPath = path.join(currentDir, entry.name);
+          if (entry.isDirectory()) {
+            const subFolder = zipFolder.folder(entry.name);
+            if (subFolder) {
+              addDirToZip(fullPath, subFolder);
+            }
+          } else if (entry.isFile()) {
+            const content = fs.readFileSync(fullPath);
+            zipFolder.file(entry.name, content);
+          }
+        }
+      };
+
+      addDirToZip(__dirname, zip);
+      const buffer = await zip.generateAsync({
+        type: 'nodebuffer',
+        compression: 'DEFLATE',
+        compressionOptions: { level: 6 },
+      });
+
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', 'attachment; filename="artemis_rea_studio_source.zip"');
+      res.send(buffer);
+    } catch (err: any) {
+      res.status(500).json({
+        ok: false,
+        error: err?.message || 'Failed to package workspace ZIP archive',
       });
     }
   });
